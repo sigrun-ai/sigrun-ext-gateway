@@ -277,7 +277,7 @@ describe("supervision (createEngine + fake timers)", () => {
 		await engine.stop();
 	});
 
-	test("stop() stops the adapter and settles the channel to stopped", async () => {
+	test("stop() stops the adapter, settles to stopped, and cancels a pending retry", async () => {
 		const host = await fakeHost();
 		let stopped = 0;
 		const adapter = fakeAdapter("loop");
@@ -289,13 +289,22 @@ describe("supervision (createEngine + fake timers)", () => {
 		await engine.start(engineCtx([
 			{ extension: "fixture", channel: adapter },
 		]));
+		// Force a pending backoff retry, then stop: the retry timer must
+		// be CANCELLED (fired stays false forever — advance past its
+		// deadline and no new start attempt runs).
+		const ctx = adapter.lastContext();
+		if (ctx === undefined) throw new Error("no context was handed to start");
+		ctx.fail(new Error("synthetic post-connect failure"));
+		expect(engine.status().channels.loop?.state).toBe("backoff");
+		expect(time.scheduled.length).toBe(1);
 		await engine.stop();
 		expect(stopped).toBe(1);
 		expect(engine.status().channels.loop?.state).toBe("stopped");
-		// A scheduled backoff retry was cancelled (stop disarms the loop).
-		adapter.failNextStart = true;
-		const engine2 = createEngine(host, { timers: fakeTimers(time) });
-		void engine2;
+		// The retry never fires even far past its deadline: the cancel
+		// disarmed the loop and no new context arrives.
+		const attempts = adapter.contexts.length;
+		await time.advance(600_000);
+		expect(adapter.contexts.length).toBe(attempts);
 	});
 
 	test("status carries since/lastError/counts and the channel id keying", async () => {
@@ -346,10 +355,11 @@ describe("supervision (createEngine + fake timers)", () => {
 // ---------------------------------------------------------------------------
 
 describe("engine.health() (§8.12)", () => {
-	test("ok when every channel is running; a config-failed channel never degrades", async () => {
+	test("a config-failed channel degrades health only after 300000 ms of failed dwell (§8.12)", async () => {
 		const host = await fakeHost();
 		// The settings store returns a config whose channel block is
-		// malformed: the channel is {failed} and disabled, never started.
+		// malformed: the channel is {failed} and never started — a static
+		// `failed` row whose §8.12 dwell the health read must count.
 		await host.stores.settings.set({
 			channels: { loop: { dm: "wrong" } },
 		});
@@ -362,8 +372,29 @@ describe("engine.health() (§8.12)", () => {
 		expect(adapter.contexts).toEqual([]);
 		expect(engine.status().channels.loop?.state).toBe("failed");
 		expect(engine.status().channels.loop?.detail).toContain("dm");
-		// A config error is "failed" but NOT health-degrading (§8.12 reads
-		// backoff/failed-in-time — a failed config never entered time).
+		// §8.12's "in backoff/failed for over 5 minutes": the static failed
+		// row degrades after 300000 ms of dwell, not immediately.
+		expect(engine.health()).toBe("ok");
+		await time.advance(300_000);
+		expect(engine.health()).toBe("ok");
+		await time.advance(1);
+		expect(engine.health()).toBe("degraded");
+		await engine.stop();
+	});
+
+	test("a disabled (stopped) channel never degrades health", async () => {
+		const host = await fakeHost({ loop: { enabled: false } });
+		const adapter = fakeAdapter("loop");
+		const time = new FakeTime();
+		const engine = createEngine(host, { timers: fakeTimers(time) });
+		await engine.start(engineCtx([
+			{ extension: "fixture", channel: adapter },
+		]));
+		expect(adapter.contexts).toEqual([]);
+		expect(engine.status().channels.loop?.state).toBe("stopped");
+		// Only `backoff`/`failed` dwell counts (§8.12); a deliberately
+		// disabled channel stays health-neutral however long it sits.
+		await time.advance(600_000);
 		expect(engine.health()).toBe("ok");
 		await engine.stop();
 	});

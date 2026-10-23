@@ -43,9 +43,6 @@ function defaultTimers() {
 }
 /** The unhealthy-dwell threshold (ms) before health degrades (§8.12). */
 const DEGRADED_AFTER_MS = 300_000;
-/** The failed-ledger window (ms) health reads (§8.12 — one hour). */
-const FAILED_LEDGER_WINDOW_MS = 3_600_000;
-void FAILED_LEDGER_WINDOW_MS;
 /** One static (never-supervised) status row. */
 function staticRow(state, detail, since) {
     return {
@@ -78,8 +75,12 @@ export function createEngine(host, deps = {}) {
     // the context is built only during a start ATTEMPT, after the
     // supervisor exists (a direct reference would hit the TDZ at
     // construction).
-    const makeContext = (_signal, report, supervisorOf) => {
-        const channelLog = ctxLog("channel");
+    const makeContext = (_signal, report, supervisorOf, 
+    /** The channel id — per-channel log attribution (Task 1's
+     *  `channel:${id}` scoping; a bare "channel" scope loses which
+     *  adapter a line came from). */
+    id) => {
+        const channelLog = ctxLog(`channel:${id}`);
         return {
             signal: _signal,
             // The three stubs below deliberately no-op/drop: the inbound
@@ -150,9 +151,9 @@ export function createEngine(host, deps = {}) {
                     continue;
                 }
                 if ("failed" in block) {
-                    // A malformed block disables the channel with the reason —
-                    // config error, never health-degrading (§8.12 keys on
-                    // backoff/failed TIME; a config failure never entered it).
+                    // A malformed block disables the channel with the reason; the
+                    // row is `failed` and §8.12's health reads its dwell like any
+                    // other `failed` state (degraded after 300000 ms).
                     staticRows.set(id, staticRow("failed", block.failed, timers.now()));
                     log.warn(`channel "${id}" config failed: ${block.failed}`);
                     continue;
@@ -171,7 +172,7 @@ export function createEngine(host, deps = {}) {
                             throw new Error(`gateway: channel "${id}" context built without a supervisor`);
                         }
                         return current;
-                    }),
+                    }, id),
                     now: timers.now,
                     random: timers.random,
                     setTimer: timers.setTimer,
@@ -202,11 +203,19 @@ export function createEngine(host, deps = {}) {
         health: () => {
             // §8.12: degraded when any enabled, configured channel has been
             // in backoff/failed for over 300000 ms, or the ledger holds
-            // failed entries from the last hour. Static rows never degrade
-            // (config errors are operator-visible, not flapping).
+            // failed entries from the last hour (the window is Task 5's
+            // `failedRecently` dependency — the engine never reads a clock
+            // against the ledger itself). Supervisors own `backoff` dwell;
+            // static rows own `failed` dwell (config-error channels).
             const now = timers.now();
             for (const supervisor of supervisors.values()) {
                 if (supervisor.unhealthyMs(now) > DEGRADED_AFTER_MS) {
+                    return "degraded";
+                }
+            }
+            for (const row of staticRows.values()) {
+                if (row.state === "failed" &&
+                    now - row.since > DEGRADED_AFTER_MS) {
                     return "degraded";
                 }
             }
