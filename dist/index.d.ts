@@ -6,12 +6,14 @@
  * factory with a defaulted first parameter would consume the host as
  * that dependency), returning `{ extension, gateway }`.
  *
- * The extension is a bare `defineExtension({ name: "gateway" })` for
- * Task 1: the prompt section (§8.10) and the `send_message`/`list_chats`
- * tools (§8.9) land with the tasks that own them. The `gateway` engine
- * is built over the host at factory time (cheap closure wiring — no
- * timers, no I/O; the pi lifecycle rule: the factory registers handlers
- * only, `start` runs after the server listens).
+ * The extension is a bare `defineExtension({ name: "gateway" })`:
+ * the prompt section (§8.10) and the `send_message`/`list_chats` tools
+ * (§8.9) land with the tasks that own them. The `gateway` engine is
+ * built over the host at factory time (cheap closure wiring — no
+ * timers, no I/O; the pi lifecycle rule: the factory registers
+ * handlers only, `start` runs after the server listens) and the
+ * admin status route (Task 2, §8.12) renders the engine's status
+ * read.
  */
 import type { SigrunHost, SigrunExtensionResult } from "@sigrun/sigrun/extension";
 /**
@@ -22,6 +24,10 @@ import type { SigrunHost, SigrunExtensionResult } from "@sigrun/sigrun/extension
 export default function createGateway(host: SigrunHost): SigrunExtensionResult;
 export { createEngine } from "./engine.js";
 export type { EngineDeps, EngineInternals } from "./engine.js";
+export { Supervisor } from "./supervisor.js";
+export type { ChannelState, ChannelStatus, StatusSink, SupervisorDeps, } from "./supervisor.js";
+export { createStatusRoute } from "./status-route.js";
+export type { GatewayStatus, StatusPairingRow, StatusRead, } from "./status-route.js";
 export { parseGatewayConfig, readConfig, DEFAULT_MEDIA_MAX_BYTES, } from "./config.js";
 export type { ChannelConfig, DmPolicy, GatewayConfig, GroupConfig, } from "./config.js";
 export { JsonFile } from "./state/json-file.js";

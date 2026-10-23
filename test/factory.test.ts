@@ -63,6 +63,9 @@ describe("createGateway (the factory)", () => {
 
 	test("start records the channel ids it was handed", async () => {
 		const host = await fakeHost();
+		// Enablement is read from settings at start (Task 2): the channel
+		// must appear in `channels` (absent = disabled, spec §8.1).
+		await host.stores.settings.set({ channels: { loop: {} } });
 		const result = await createGateway(host);
 		const engine = result.gateway;
 		if (engine === undefined) throw new Error("no gateway on the result");
