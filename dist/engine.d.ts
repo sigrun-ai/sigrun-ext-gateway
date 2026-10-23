@@ -27,7 +27,8 @@ export interface EngineDeps {
 }
 /** The task-internal surface over the contract four (see the module doc). */
 export interface EngineInternals {
-    /** The engine's state directory (`host.stores.paths.state`). */
+    /** The engine's state directory: `<stateDir>/gateway` (the scoped
+     *  `host.stores.paths.state` plus the engine's own segment). */
     readonly stateDir: string;
     /** The channel ids the last `start` recorded, in order. */
     readonly channelIds: () => readonly string[];

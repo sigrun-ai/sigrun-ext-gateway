@@ -37,7 +37,8 @@ export interface EngineDeps {
 
 /** The task-internal surface over the contract four (see the module doc). */
 export interface EngineInternals {
-	/** The engine's state directory (`host.stores.paths.state`). */
+	/** The engine's state directory: `<stateDir>/gateway` (the scoped
+	 *  `host.stores.paths.state` plus the engine's own segment). */
 	readonly stateDir: string;
 	/** The channel ids the last `start` recorded, in order. */
 	readonly channelIds: () => readonly string[];
@@ -92,8 +93,15 @@ export function createEngine(
 				}
 				await entry.channel.start({
 					signal: ctx.signal,
+					// The three stubs below deliberately no-op: the inbound pipeline
+					// (Task 3) is the real consumer of these — before it lands, an
+					// adapter event admitted here would be silently processed twice
+					// or lost, so the honest skeleton DROPS (the outcome the adapter's
+					// ack contract treats as safe: dedupe makes a later retry safe).
 					receive: async () => ({ outcome: "dropped" as const }),
+					// Button taps have no token table until Task 4/9 — swallow.
 					action: async () => {},
+					// No supervisor reads status until Task 2 — swallow.
 					status: () => {},
 					fail: (error) => {
 						log.error(`channel "${entry.channel.id}" failed`, error);

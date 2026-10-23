@@ -59,8 +59,15 @@ export function createEngine(host, deps = {}) {
                 }
                 await entry.channel.start({
                     signal: ctx.signal,
+                    // The three stubs below deliberately no-op: the inbound pipeline
+                    // (Task 3) is the real consumer of these — before it lands, an
+                    // adapter event admitted here would be silently processed twice
+                    // or lost, so the honest skeleton DROPS (the outcome the adapter's
+                    // ack contract treats as safe: dedupe makes a later retry safe).
                     receive: async () => ({ outcome: "dropped" }),
+                    // Button taps have no token table until Task 4/9 — swallow.
                     action: async () => { },
+                    // No supervisor reads status until Task 2 — swallow.
                     status: () => { },
                     fail: (error) => {
                         log.error(`channel "${entry.channel.id}" failed`, error);

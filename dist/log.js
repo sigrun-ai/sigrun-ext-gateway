@@ -5,9 +5,11 @@
  * non-reversible form sender ids take in status output.
  */
 import { createHash } from "node:crypto";
-/** The irreversible form a platform sender id takes in operator-facing output. */
+/** The irreversible form a platform sender id takes in operator-facing
+ *  output: the sha256 digest's first 8 hex chars (the plan's pinned
+ *  format — enough to correlate without leaking the raw platform id). */
 export function hashId(id) {
-    return createHash("sha256").update(id).digest("hex").slice(0, 16);
+    return createHash("sha256").update(id).digest("hex").slice(0, 8);
 }
 /** The emitted-once keys this process has already logged. */
 const onceLogged = new Set();

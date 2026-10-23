@@ -4,7 +4,9 @@
  * fires a single line, never one per event), and `hashId` — the
  * non-reversible form sender ids take in status output.
  */
-/** The irreversible form a platform sender id takes in operator-facing output. */
+/** The irreversible form a platform sender id takes in operator-facing
+ *  output: the sha256 digest's first 8 hex chars (the plan's pinned
+ *  format — enough to correlate without leaking the raw platform id). */
 export declare function hashId(id: string): string;
 /** One scoped logger: console methods plus a per-key `once`. */
 export interface EngineLog {
