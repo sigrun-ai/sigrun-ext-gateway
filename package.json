@@ -1,0 +1,54 @@
+{
+	"name": "@sigrun/ext-gateway",
+	"version": "0.1.0",
+	"description": "Gateway engine extension for sigrun (pi-durable): chat-transport supervision — channel adapters, inbound pipeline, delivery",
+	"type": "module",
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"CHANGELOG.md"
+	],
+	"scripts": {
+		"test": "node scripts/check-manifest.mjs --expect-name @sigrun/ext-gateway && vitest run",
+		"typecheck": "tsc --noEmit",
+		"build": "tsc -p tsconfig.build.json",
+		"prepublishOnly": "npm run build"
+	},
+	"peerDependencies": {
+		"@earendil-works/chord": "1.3.0",
+		"@earendil-works/pi-durable": "1.3.0"
+	},
+	"devDependencies": {
+		"@earendil-works/chord": "1.3.0",
+		"@earendil-works/pi-durable": "1.3.0",
+		"@sigrun/shared": "file:../sigrun/shared",
+		"@sigrun/sigrun": "file:../sigrun",
+		"@types/node": "^26.6.4",
+		"tsx": "^4.23.15",
+		"typescript": "^7.0.2",
+		"vitest": "^5.0.3"
+	},
+	"license": "MIT",
+	"repository": {
+		"type": "github",
+		"url": "git+https://github.com/sigrun-ai/sigrun-ext-gateway.git"
+	},
+	"bugs": {
+		"url": "https://github.com/sigrun-ai/sigrun-ext-gateway/issues"
+	},
+	"homepage": "https://github.com/sigrun-ai/sigrun-ext-gateway#readme",
+	"publishConfig": {
+		"access": "public",
+		"provenance": true
+	}
+}
