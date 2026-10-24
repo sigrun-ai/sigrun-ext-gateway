@@ -79,13 +79,9 @@ export class BindingStore {
 
 	/** The live binding for `key`, or undefined when unbound. */
 	get(key: string): Binding | undefined {
-		// The in-memory draft is authoritative between writes (every
-		// mutation re-reads the file inside its queue slot; a `get`
-		// between queued writes must not observe a torn state, so the
-		// store keeps its own synchronous mirror under the same queue).
-		return this.mirror.get(key) === undefined
-			? this.mirror.get(key)
-			: toBinding(this.mirror.get(key));
+		// The synchronous mirror is authoritative (loaded at construction,
+		// refreshed inside every queued mutation — see {@link mirror}).
+		return toBinding(this.mirror.get(key));
 	}
 
 	/** Bind `key` to `conversationId`, recording any prior binding in `previous`. */

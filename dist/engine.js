@@ -72,6 +72,11 @@ export function createEngine(host, deps = {}) {
     // submissionId → the origin record (Task 3's pipeline writes; the
     // outbound tasks read). One map per ENGINE (shared across channels).
     const origins = new Map();
+    // Every constructed channel pipeline's flush handle: stopIntake
+    // flushes the open album windows through these (one per supervised
+    // channel — the pipelines share state files but each owns its
+    // channel's in-flight albums).
+    const pipelines = [];
     let started = false;
     // The engine-owned half of every adapter context (Task 3's pipeline
     // drives `receive`; the supervisor's makeContext seam stays stable).
@@ -101,6 +106,7 @@ export function createEngine(host, deps = {}) {
             log: channelLog,
             origins,
         });
+        pipelines.push(receivePipeline);
         return {
             signal: _signal,
             // The §8.4 pipeline: the config block is read LIVE per event
@@ -224,11 +230,16 @@ export function createEngine(host, deps = {}) {
             }
         },
         stopIntake: async () => {
-            // Intake closes before the shutdown drain (the ordering). The
-            // Task 3 pipeline has no long-lived intake machinery (every
-            // receive settles with its outcome); the album close timers —
-            // the one deferred submission path — are awaited by `stop`'s
-            // supervisor drain via each adapter's stop.
+            // Intake closes before the shutdown drain (the ordering) — but
+            // FIRST every open album window flushes: a shutdown inside the
+            // 1500 ms merge window must submit the already-admitted album
+            // events (they committed `seen`; without the flush, the
+            // platform's redelivery would dedupe to a no-op and the album
+            // would be lost). One failed album's flush is logged and never
+            // strands the others (flushAlbums drains every group).
+            const pending = [...pipelines];
+            pipelines.length = 0;
+            await Promise.all(pending.map((pipeline) => pipeline.flushAlbums()));
         },
         stop: async () => {
             // The adapters stop only once every settle has been delivered

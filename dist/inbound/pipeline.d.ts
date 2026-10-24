@@ -85,9 +85,18 @@ export interface PipelineDeps {
  */
 export type Receive = (channelId: string, event: InboundEvent, config: ChannelConfig) => Promise<PipelineOutcome>;
 /**
- * Build the pipeline over the deps. ONE pipeline per engine (the state
- * stores are shared across channels; the binding key carries the
- * channel) — the engine wires every supervised channel's
- * `ChannelContext.receive` through it.
+ * A pipeline's receive, carrying the engine-owned flush handle: ONE
+ * pipeline per engine (the state stores are shared across channels; the
+ * binding key carries the channel) — the engine wires every supervised
+ * channel's `ChannelContext.receive` through the callable and calls
+ * `flushAlbums` from its `stopIntake`.
  */
-export declare function createPipeline(deps: PipelineDeps): Receive;
+export interface PipelineHandle extends Receive {
+    /**
+     * Close every open album window and submit its merged batch; the
+     * engine's `stopIntake` runs this before intake closes (the §8.0
+     * ordering: flush, then stop admitting).
+     */
+    flushAlbums(): Promise<void>;
+}
+export declare function createPipeline(deps: PipelineDeps): PipelineHandle;

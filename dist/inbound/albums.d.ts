@@ -34,9 +34,11 @@ export declare class AlbumCollector {
     add(key: string, event: InboundEvent, text: string): string[] | undefined;
     /**
      * Close the group for `key`/`groupId` NOW: returns the collected
-     * texts (empty when none). Called when the window elapsed — the
-     * pipeline's per-group timer — or on the engine's stopIntake (an
-     * admission in flight must not be dropped at shutdown).
+     * texts (empty when none). Two callers: the pipeline's per-group
+     * window timer (the elapsed 1500 ms) and the pipeline's
+     * `flushAlbums` (the engine's `stopIntake` — an admission in flight
+     * must not be dropped at shutdown; the flush submits every open
+     * group's merged batch before intake closes).
      */
     close(key: string, groupId: string): string[];
     /** Is a group OPEN (collecting) for `key`/`groupId`? */

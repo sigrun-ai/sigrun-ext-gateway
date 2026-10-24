@@ -126,12 +126,22 @@ export type Receive = (
 ) => Promise<PipelineOutcome>;
 
 /**
- * Build the pipeline over the deps. ONE pipeline per engine (the state
- * stores are shared across channels; the binding key carries the
- * channel) — the engine wires every supervised channel's
- * `ChannelContext.receive` through it.
+ * A pipeline's receive, carrying the engine-owned flush handle: ONE
+ * pipeline per engine (the state stores are shared across channels; the
+ * binding key carries the channel) — the engine wires every supervised
+ * channel's `ChannelContext.receive` through the callable and calls
+ * `flushAlbums` from its `stopIntake`.
  */
-export function createPipeline(deps: PipelineDeps): Receive {
+export interface PipelineHandle extends Receive {
+	/**
+	 * Close every open album window and submit its merged batch; the
+	 * engine's `stopIntake` runs this before intake closes (the §8.0
+	 * ordering: flush, then stop admitting).
+	 */
+	flushAlbums(): Promise<void>;
+}
+
+export function createPipeline(deps: PipelineDeps): PipelineHandle {
 	const now = deps.now ?? Date.now;
 	const bindings = new BindingStore(join(deps.stateDir, "bindings.json"), {
 		now,
@@ -144,8 +154,26 @@ export function createPipeline(deps: PipelineDeps): Receive {
 	const albums = new AlbumCollector(now, ALBUM_WINDOW_MS);
 	// Per-group close timers (the album window's flush).
 	const albumTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	// The open groups' submission metadata, keyed by the same timer key:
+	// a flush (stopIntake) needs everything a receive would have carried.
+	const openAlbums = new Map<
+		string,
+		{
+			channelId: string;
+			key: string;
+			groupId: string;
+			event: InboundEvent;
+			user: string;
+			conversationId: ConversationId;
+			config: ChannelConfig;
+		}
+	>();
 
-	return async (channelId, event, config): Promise<PipelineOutcome> => {
+	const receivePipeline: PipelineHandle = async (
+		channelId,
+		event,
+		config,
+	): Promise<PipelineOutcome> => {
 		const key = bindingKey(channelId, event.chat);
 		const seenId = `${key}:${event.messageId}`;
 
@@ -326,11 +354,16 @@ export function createPipeline(deps: PipelineDeps): Receive {
 				// contract (the error class ships in sigrun's runtime, not
 				// the extension types).
 				const ref = unservedModelRef(error);
+				// Commit seen BEFORE the notice: the idempotency record
+				// must be durable before the fallible network write — a
+				// commit failure after a sent notice would make the
+				// platform redeliver into a duplicate submit + duplicate
+				// notice.
+				await seen.commit(`${key}:${event.messageId}`, now());
 				await sendNotice(
 					event.chat,
 					UNSERVED_MODEL_NOTICE.replace("<ref>", ref),
 				);
-				await seen.commit(`${key}:${event.messageId}`, now());
 				return dropped();
 			}
 			if (
@@ -343,11 +376,13 @@ export function createPipeline(deps: PipelineDeps): Receive {
 					`submit failed (conversation ${String(conversationId)}, code "${code}")`,
 					error,
 				);
+				// Commit seen BEFORE the notice (the same ordering as the
+				// UnservedModelError branch: idempotency first, network second).
+				await seen.commit(`${key}:${event.messageId}`, now());
 				await sendNotice(
 					event.chat,
 					"Could not deliver that message. Try again in a moment.",
 				);
-				await seen.commit(`${key}:${event.messageId}`, now());
 				return dropped();
 			}
 			throw error;
@@ -376,8 +411,18 @@ export function createPipeline(deps: PipelineDeps): Receive {
 		if (event.groupId === undefined) return;
 		const timerKey = `${key}:${event.groupId}`;
 		if (albumTimers.has(timerKey)) return;
+		openAlbums.set(timerKey, {
+			channelId,
+			key,
+			groupId: event.groupId,
+			event,
+			user,
+			conversationId,
+			config,
+		});
 		const timer = setTimeout(() => {
 			albumTimers.delete(timerKey);
+			openAlbums.delete(timerKey);
 			const texts = albums.close(key, event.groupId ?? "");
 			if (texts.length === 0) return;
 			void submit(channelId, event, key, conversationId, user, texts, config)
@@ -390,6 +435,49 @@ export function createPipeline(deps: PipelineDeps): Receive {
 		}, ALBUM_WINDOW_MS);
 		albumTimers.set(timerKey, timer);
 	}
+
+	/**
+	 * Flush every open album window NOW and submit its merged batch —
+	 * the engine's `stopIntake` calls this so a shutdown inside the
+	 * 1500 ms window never loses a collected album (its events are
+	 * already committed seen; without this flush the platform's
+	 * redelivery would be a dedupe no-op, permanently dropping them).
+	 *
+	 * Every submission settles before this resolves; an unexpected
+	 * throw on one album is logged (the flush still drains the rest —
+	 * one failed album must not strand the others at shutdown).
+	 */
+	async function flushAlbums(): Promise<void> {
+		for (const timer of albumTimers.values()) clearTimeout(timer);
+		albumTimers.clear();
+		const pending = [...openAlbums.values()];
+		openAlbums.clear();
+		await Promise.all(
+			pending.map(async (album) => {
+				const texts = albums.close(album.key, album.groupId);
+				if (texts.length === 0) return;
+				try {
+					await submit(
+						album.channelId,
+						album.event,
+						album.key,
+						album.conversationId,
+						album.user,
+						texts,
+						album.config,
+					);
+				} catch (error) {
+					deps.log.error("album flush submit failed", error);
+				}
+			}),
+		);
+	}
+
+	// The flush handle rides the returned receive function (a property,
+	// not a separate return shape — the engine holds the same callable it
+	// wires into every adapter's context).
+	receivePipeline.flushAlbums = flushAlbums;
+	return receivePipeline;
 }
 
 /** Extract the `provider/modelId` ref from an UnservedModelError-like. */

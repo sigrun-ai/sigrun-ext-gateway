@@ -31,12 +31,6 @@ import { SeenSet } from "../state/seen.js";
 import { IdentityStore } from "../state/identities.js";
 /** The pinned UnservedModelError notice (spec §8.4 M12, exact copy). */
 const UNSERVED_MODEL_NOTICE = "The model <ref> is not available. Use /model to pick another.";
-/**
- * Build the pipeline over the deps. ONE pipeline per engine (the state
- * stores are shared across channels; the binding key carries the
- * channel) — the engine wires every supervised channel's
- * `ChannelContext.receive` through it.
- */
 export function createPipeline(deps) {
     const now = deps.now ?? Date.now;
     const bindings = new BindingStore(join(deps.stateDir, "bindings.json"), {
@@ -47,7 +41,10 @@ export function createPipeline(deps) {
     const albums = new AlbumCollector(now, ALBUM_WINDOW_MS);
     // Per-group close timers (the album window's flush).
     const albumTimers = new Map();
-    return async (channelId, event, config) => {
+    // The open groups' submission metadata, keyed by the same timer key:
+    // a flush (stopIntake) needs everything a receive would have carried.
+    const openAlbums = new Map();
+    const receivePipeline = async (channelId, event, config) => {
         const key = bindingKey(channelId, event.chat);
         const seenId = `${key}:${event.messageId}`;
         // Step 1 — the claimed gate (injected; absent = claimed posture).
@@ -181,8 +178,13 @@ export function createPipeline(deps) {
                 // contract (the error class ships in sigrun's runtime, not
                 // the extension types).
                 const ref = unservedModelRef(error);
-                await sendNotice(event.chat, UNSERVED_MODEL_NOTICE.replace("<ref>", ref));
+                // Commit seen BEFORE the notice: the idempotency record
+                // must be durable before the fallible network write — a
+                // commit failure after a sent notice would make the
+                // platform redeliver into a duplicate submit + duplicate
+                // notice.
                 await seen.commit(`${key}:${event.messageId}`, now());
+                await sendNotice(event.chat, UNSERVED_MODEL_NOTICE.replace("<ref>", ref));
                 return dropped();
             }
             if (error instanceof Error &&
@@ -190,8 +192,10 @@ export function createPipeline(deps) {
                 // A short notice + the error code logged (M12).
                 const code = conversationOpCode(error);
                 deps.log.error(`submit failed (conversation ${String(conversationId)}, code "${code}")`, error);
-                await sendNotice(event.chat, "Could not deliver that message. Try again in a moment.");
+                // Commit seen BEFORE the notice (the same ordering as the
+                // UnservedModelError branch: idempotency first, network second).
                 await seen.commit(`${key}:${event.messageId}`, now());
+                await sendNotice(event.chat, "Could not deliver that message. Try again in a moment.");
                 return dropped();
             }
             throw error;
@@ -214,8 +218,18 @@ export function createPipeline(deps) {
         const timerKey = `${key}:${event.groupId}`;
         if (albumTimers.has(timerKey))
             return;
+        openAlbums.set(timerKey, {
+            channelId,
+            key,
+            groupId: event.groupId,
+            event,
+            user,
+            conversationId,
+            config,
+        });
         const timer = setTimeout(() => {
             albumTimers.delete(timerKey);
+            openAlbums.delete(timerKey);
             const texts = albums.close(key, event.groupId ?? "");
             if (texts.length === 0)
                 return;
@@ -229,6 +243,40 @@ export function createPipeline(deps) {
         }, ALBUM_WINDOW_MS);
         albumTimers.set(timerKey, timer);
     }
+    /**
+     * Flush every open album window NOW and submit its merged batch —
+     * the engine's `stopIntake` calls this so a shutdown inside the
+     * 1500 ms window never loses a collected album (its events are
+     * already committed seen; without this flush the platform's
+     * redelivery would be a dedupe no-op, permanently dropping them).
+     *
+     * Every submission settles before this resolves; an unexpected
+     * throw on one album is logged (the flush still drains the rest —
+     * one failed album must not strand the others at shutdown).
+     */
+    async function flushAlbums() {
+        for (const timer of albumTimers.values())
+            clearTimeout(timer);
+        albumTimers.clear();
+        const pending = [...openAlbums.values()];
+        openAlbums.clear();
+        await Promise.all(pending.map(async (album) => {
+            const texts = albums.close(album.key, album.groupId);
+            if (texts.length === 0)
+                return;
+            try {
+                await submit(album.channelId, album.event, album.key, album.conversationId, album.user, texts, album.config);
+            }
+            catch (error) {
+                deps.log.error("album flush submit failed", error);
+            }
+        }));
+    }
+    // The flush handle rides the returned receive function (a property,
+    // not a separate return shape — the engine holds the same callable it
+    // wires into every adapter's context).
+    receivePipeline.flushAlbums = flushAlbums;
+    return receivePipeline;
 }
 /** Extract the `provider/modelId` ref from an UnservedModelError-like. */
 function unservedModelRef(error) {

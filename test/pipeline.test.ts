@@ -29,6 +29,8 @@ import { createPipeline } from "../src/inbound/pipeline.js";
 import { parseGatewayConfig } from "../src/config.js";
 import { ALBUM_WINDOW_MS } from "../src/inbound/albums.js";
 import type { ConversationId } from "@earendil-works/pi-durable";
+import { createEngine } from "../src/engine.js";
+import type { ChannelContext } from "@sigrun/sigrun/extension";
 
 /** Await `ms` (the album window's close rides a real timer). */
 function sleep(ms: number): Promise<void> {
@@ -391,6 +393,120 @@ describe("pipeline: album merge (§8.4 step 6)", () => {
 		await receive(dmEvent({ messageId: "m2", text: "plain" }));
 		expect(submits()).toHaveLength(2);
 	});
+
+	test("flushAlbums submits a collecting album without waiting for the window (the stopIntake path)", async () => {
+		const origins = new Map();
+		const dir = await mkdtemp(join(tmpdir(), "sigrun-gw-pipeline-"));
+		cleanups.push(() => rm(dir, { recursive: true, force: true }));
+		const host = await createFakeHost({ storesDir: dir, users: [{ user: "alice", admin: true }] });
+		const parsed = parseGatewayConfig({
+			channels: { loop: { dm: "allowlist", allow: [{ sender: "100000001", user: "alice" }] } },
+		}).channels.loop;
+		if (parsed === undefined || "failed" in parsed) {
+			throw new Error("test setup: loop channel must parse");
+		}
+		const pipeline = createPipeline({
+			host,
+			channel: fakeChannel(),
+			stateDir: dir,
+			log: silentLog(),
+			origins,
+		});
+		// The album collects (both events admitted, no submit yet — the
+		// 1500 ms window is still open).
+		const first = await pipeline("loop", dmEvent({ messageId: "m1", groupId: "album-1", text: "part 1" }), parsed);
+		const second = await pipeline("loop", dmEvent({ messageId: "m2", groupId: "album-1", text: "part 2" }), parsed);
+		expect([first.outcome, second.outcome]).toEqual(["admitted", "admitted"]);
+		// The flush (what stopIntake runs): the merged batch submits NOW,
+		// no timer fired, no window wait.
+		await pipeline.flushAlbums();
+		const submits = host.calls
+			.filter((call) => call.method === "conversations.submit")
+			.map((call) => call.args[1] as readonly SubmissionInputPart[]);
+		expect(submits).toHaveLength(1);
+		expect(submits[0]).toEqual([
+			{ type: "text", text: "part 1\npart 2" },
+		]);
+		// The flushed album never double-submits when its (cleared) timer
+		// slot would have fired: flushing is terminal per group.
+		await sleep(WINDOW_CLOSE_MS);
+		const after = host.calls.filter(
+			(call) => call.method === "conversations.submit",
+		).length;
+		expect(after).toBe(1);
+	});
+});
+
+describe("engine stopIntake: the album flush (Review finding 1)", () => {
+	test("stopIntake submits a collecting album — no timer, no loss at shutdown", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "sigrun-gw-pipeline-"));
+		cleanups.push(() => rm(dir, { recursive: true, force: true }));
+		const host = await createFakeHost({
+			storesDir: dir,
+			users: [{ user: "alice", admin: true }],
+		});
+		await host.stores.settings.set({
+			channels: {
+				loop: {
+					dm: "allowlist",
+					allow: [{ sender: "100000001", user: "alice" }],
+				},
+			},
+		});
+		// A REAL channel adapter whose start captures the context (the
+		// engine hands its receive through the supervisor's makeContext).
+		let adapterContext: ChannelContext | undefined;
+		const channel: ChannelContribution = {
+			id: "loop",
+			label: "Loop",
+			capabilities: {
+				chatTypes: ["dm"],
+				maxMessageLength: 200,
+				format: "markdown",
+			},
+			configured: () => ({ status: "ready" }),
+			start: async (ctx) => {
+				adapterContext = ctx;
+			},
+			send: async () => ({ messageIds: [] }),
+		};
+		const engine = createEngine(host);
+		await engine.start({
+			channels: [{ extension: "fixture", channel }],
+			signal: new AbortController().signal,
+		});
+		if (adapterContext === undefined) {
+			throw new Error("test setup: the adapter never received a context");
+		}
+		// The album collects (both events admitted; the 1500 ms window
+		// stays open — nothing waits for it).
+		const event = (n: number): InboundEvent => ({
+			messageId: `m${n}`,
+			chat: { chatId: "100000001", chatType: "dm" },
+			sender: { id: "100000001", name: "Alice" },
+			text: `part ${n}`,
+			groupId: "album-1",
+		});
+		const outcomes = await Promise.all([
+			adapterContext.receive(event(1)),
+			adapterContext.receive(event(2)),
+		]);
+		expect(outcomes.map((o) => o.outcome)).toEqual(["admitted", "admitted"]);
+		// Nothing submitted yet (the window holds the merged batch).
+		expect(
+			host.calls.filter((c) => c.method === "conversations.submit").length,
+		).toBe(0);
+		// The engine's stopIntake flushes: the merged submission lands NOW.
+		await engine.stopIntake();
+		const submits = host.calls
+			.filter((c) => c.method === "conversations.submit")
+			.map((c) => c.args[1] as readonly SubmissionInputPart[]);
+		expect(submits).toHaveLength(1);
+		expect(submits[0]).toEqual([
+			{ type: "text", text: "part 1\npart 2" },
+		]);
+		await engine.stop();
+	});
 });
 
 describe("pipeline: submit-error outcomes (M12)", () => {
@@ -435,6 +551,34 @@ describe("pipeline: submit-error outcomes (M12)", () => {
 		// The released id is claimable again (the platform redelivers).
 		const outcome = await receive(dmEvent({ messageId: "m1" }));
 		expect(outcome).toEqual({ outcome: "admitted" });
+	});
+
+	test("the seen id is committed BEFORE the notice (M12 ordering)", async () => {
+		const { host, receive, channel } = await rig();
+		// The notice send REJECTS: the idempotency record must already be
+		// durable (commit-before-notice) — a redelivery after this
+		// failure must dedupe to a no-op, never a second submit+notice.
+		(channel as { send: unknown }).send = async () => {
+			throw new Error("synthetic send failure");
+		};
+		failNextSubmit(
+			host,
+			namedError("UnservedModelError", "model gone", {
+				ref: { provider: "faux", modelId: "m2" },
+			}),
+		);
+		const outcome = await receive(dmEvent({ messageId: "m1" }));
+		expect(outcome).toEqual({ outcome: "dropped" });
+		// The redelivery dedupes (the committed id won despite the failed
+		// notice): the failure patch is DISARMED by then (it fires once),
+		// so a re-submission would have recorded a submit — zero recorded
+		// submits proves the committed id blocked it.
+		const redelivered = await receive(dmEvent({ messageId: "m1" }));
+		expect(redelivered).toEqual({ outcome: "dropped" });
+		const attempts = host.calls.filter(
+			(c) => c.method === "conversations.submit",
+		).length;
+		expect(attempts).toBe(0);
 	});
 
 	test("a submit-error reply goes to the event's chat", async () => {
