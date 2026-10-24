@@ -43,6 +43,7 @@ import type {
 } from "@earendil-works/pi-durable";
 import type { ChannelConfig } from "../config.js";
 import type { EngineLog } from "../log.js";
+import type { StreamRegistry } from "../outbound/stream.js";
 import { buildEnvelope } from "./envelope.js";
 import { AlbumCollector, ALBUM_WINDOW_MS } from "./albums.js";
 import { bindingKey, BindingStore } from "../state/bindings.js";
@@ -69,6 +70,7 @@ export type PipelineOutcome =
 export interface SubmissionOrigin {
 	readonly bindingKey: string;
 	readonly channel: string;
+	readonly chat: ChatRef;
 }
 
 /**
@@ -128,6 +130,9 @@ export interface PipelineDeps {
 	readonly stages?: PipelineStages;
 	/** The engine-wide access state (Task 4). Absent → a private one. */
 	readonly access?: AccessState;
+	/** The origin-chat stream registry (Task 6). Absent in stand-alone
+	 *  pipeline tests disables streaming; the engine always wires it. */
+	readonly streams?: StreamRegistry;
 	/** The clock (tests inject a fake). Default: real. */
 	readonly now?: () => number;
 }
@@ -541,6 +546,21 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 			requestId: `${key}:${event.messageId}`,
 			whenBusy: config.busy,
 		};
+		const origin: SubmissionOrigin = {
+			bindingKey: key,
+			channel: channelId,
+			chat: event.chat,
+		};
+		if (deps.streams !== undefined) {
+			try {
+				// Open BEFORE submit: a fast provider may publish its first (or
+				// only) live frame before submit's promise resolves.
+				await deps.streams.open(conversationId as number, origin);
+			} catch (error) {
+				// Admission must still proceed when only the preview cannot open.
+				deps.log.error("stream open failed", error);
+			}
+		}
 		try {
 			const record = await deps.host.conversations.submit(
 				conversationId,
@@ -548,12 +568,10 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 				opts,
 			);
 			await seen.commit(`${key}:${event.messageId}`, now());
-			deps.origins.set(record.id as SubmissionId, {
-				bindingKey: key,
-				channel: channelId,
-			});
+			deps.origins.set(record.id as SubmissionId, origin);
 			return { outcome: "admitted" };
 		} catch (error) {
+			deps.streams?.abandon(conversationId as number);
 			if (
 				error instanceof Error &&
 				error.name === "UnservedModelError"

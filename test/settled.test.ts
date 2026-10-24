@@ -154,7 +154,7 @@ async function rig(): Promise<Rig> {
 		channelOf,
 		configOf,
 		origins: new Map<SubmissionId, SubmissionOrigin>(),
-		streams: { finalize: async () => false },
+		streams: { finalize: async () => false, abandon: () => {} },
 		log: silentLog(),
 	};
 	return { host, bindings, identities, ledger, deps, channelOf };
@@ -328,7 +328,7 @@ describe("onRunSettled: access re-check (M7)", () => {
 						},
 				}).channels.loop as ChannelConfig,
 			origins: new Map(),
-			streams: { finalize: async () => false },
+			streams: { finalize: async () => false, abandon: () => {} },
 			log: silentLog(),
 		};
 		await onRunSettled(answeredEvent(conversationId as number, "the answer"), deps);
@@ -343,6 +343,7 @@ describe("onRunSettled: unanswered runs", () => {
 		harness.deps.origins.set(1 as SubmissionId, {
 			bindingKey: KEY,
 			channel: "loop",
+			chat: CHAT,
 		});
 		await onRunSettled(unansweredEvent(7, "model_error"), harness.deps);
 		const entry = harness.ledger.nextPending("loop");
@@ -359,6 +360,7 @@ describe("onRunSettled: unanswered runs", () => {
 		harness.deps.origins.set(1 as SubmissionId, {
 			bindingKey: KEY,
 			channel: "loop",
+			chat: CHAT,
 		});
 		await onRunSettled(unansweredEvent(7, "aborted"), harness.deps);
 		const entry = harness.ledger.nextPending("loop");
@@ -371,6 +373,7 @@ describe("onRunSettled: unanswered runs", () => {
 		harness.deps.origins.set(1 as SubmissionId, {
 			bindingKey: KEY,
 			channel: "loop",
+			chat: CHAT,
 		});
 		await onRunSettled(unansweredEvent(7, "model_error"), harness.deps);
 		const first = harness.ledger.nextPending("loop");
@@ -388,19 +391,24 @@ describe("onRunSettled: unanswered runs", () => {
 	});
 });
 
-describe("onRunSettled: the streaming hand-off stub", () => {
+describe("onRunSettled: the streaming hand-off", () => {
 	test("streams.finalize is consulted once per conversation; false enqueues finals", async () => {
 		const harness = await rig();
 		await harness.bindings.bind(KEY, 7, CHAT);
 		let finalizeCalls = 0;
 		const deps: SettledDeps = {
 			...harness.deps,
+			origins: new Map<SubmissionId, SubmissionOrigin>([
+				[1 as SubmissionId, { bindingKey: KEY, channel: "loop", chat: CHAT }],
+			]),
 			streams: {
-				finalize: async (conversationId: number) => {
+				finalize: async (conversationId: number, chunks: string[]) => {
 					finalizeCalls++;
 					expect(conversationId).toBe(7);
+					expect(chunks).toEqual(["the answer"]);
 					return false;
 				},
+				abandon: () => {},
 			},
 		};
 		await onRunSettled(answeredEvent(7, "the answer"), deps);
@@ -432,10 +440,10 @@ describe("onRunSettled: the streaming hand-off stub", () => {
 				});
 				return parsed.channels.loop as ChannelConfig;
 			},
-			streams: { finalize: async () => true },
+			streams: { finalize: async () => true, abandon: () => {} },
 			// The run came from THIS chat (the origin record).
 			origins: new Map<SubmissionId, SubmissionOrigin>([
-				[1 as SubmissionId, { bindingKey: KEY, channel: "loop" }],
+				[1 as SubmissionId, { bindingKey: KEY, channel: "loop", chat: CHAT }],
 			]),
 		};
 		await onRunSettled(answeredEvent(7, "the answer"), deps);

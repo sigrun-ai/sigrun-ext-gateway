@@ -25,10 +25,11 @@
  * text). A failed notice send is logged, never thrown: the submit
  * error already resolved the event's fate.
  */
-import type { ActionEvent, ChannelContribution, InboundEvent, SigrunHost, SubmissionInputPart } from "@sigrun/sigrun/extension";
+import type { ActionEvent, ChannelContribution, ChatRef, InboundEvent, SigrunHost, SubmissionInputPart } from "@sigrun/sigrun/extension";
 import type { SubmissionId } from "@earendil-works/pi-durable";
 import type { ChannelConfig } from "../config.js";
 import type { EngineLog } from "../log.js";
+import type { StreamRegistry } from "../outbound/stream.js";
 import { BindingStore } from "../state/bindings.js";
 import { IdentityStore } from "../state/identities.js";
 import { PairingStore } from "../access/pairing.js";
@@ -50,6 +51,7 @@ export type PipelineOutcome = {
 export interface SubmissionOrigin {
     readonly bindingKey: string;
     readonly channel: string;
+    readonly chat: ChatRef;
 }
 /**
  * The engine-wide access state (Task 4): every store the access steps
@@ -97,6 +99,9 @@ export interface PipelineDeps {
     readonly stages?: PipelineStages;
     /** The engine-wide access state (Task 4). Absent → a private one. */
     readonly access?: AccessState;
+    /** The origin-chat stream registry (Task 6). Absent in stand-alone
+     *  pipeline tests disables streaming; the engine always wires it. */
+    readonly streams?: StreamRegistry;
     /** The clock (tests inject a fake). Default: real. */
     readonly now?: () => number;
 }

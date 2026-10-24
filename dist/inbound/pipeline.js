@@ -293,16 +293,30 @@ export function createPipeline(deps) {
             requestId: `${key}:${event.messageId}`,
             whenBusy: config.busy,
         };
+        const origin = {
+            bindingKey: key,
+            channel: channelId,
+            chat: event.chat,
+        };
+        if (deps.streams !== undefined) {
+            try {
+                // Open BEFORE submit: a fast provider may publish its first (or
+                // only) live frame before submit's promise resolves.
+                await deps.streams.open(conversationId, origin);
+            }
+            catch (error) {
+                // Admission must still proceed when only the preview cannot open.
+                deps.log.error("stream open failed", error);
+            }
+        }
         try {
             const record = await deps.host.conversations.submit(conversationId, parts, opts);
             await seen.commit(`${key}:${event.messageId}`, now());
-            deps.origins.set(record.id, {
-                bindingKey: key,
-                channel: channelId,
-            });
+            deps.origins.set(record.id, origin);
             return { outcome: "admitted" };
         }
         catch (error) {
+            deps.streams?.abandon(conversationId);
             if (error instanceof Error &&
                 error.name === "UnservedModelError") {
                 // The pinned notice with the ref interpolated (M12). Named

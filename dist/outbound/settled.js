@@ -14,9 +14,9 @@
  *   tool calls are never shown); an answer with NO text blocks gets
  *   the pinned "(no text reply)" notice (Review Focus 4 — an empty
  *   send is a platform rejection, never an honest reply).
- * - The origin-chat streaming hand-off is Task 6's seam
- *   (`deps.streams.finalize`, a no-op stub returning false here);
- *   when the stream owns delivery, no final entries enqueue.
+ * - The origin-chat streaming hand-off runs through `deps.streams`:
+ *   rendered chunks cross to the registry at this layer while the
+ *   boolean answer decides whether the origin's finals enqueue.
  * - An unanswered run notifies the ORIGIN chat only (from
  *   `deps.origins`): the pinned "Stopped." for an abort reason, a
  *   short reason notice otherwise.
@@ -50,21 +50,27 @@ async function run(event, deps) {
         await fanOutAnswer(event, deps, conversationId);
         return;
     }
+    deps.streams.abandon(conversationId);
     await notifyOrigin(event, deps);
 }
 /** The answered fan-out: every live bound key, access-checked. */
 async function fanOutAnswer(event, deps, conversationId) {
     const keys = deps.bindings.keysOf(conversationId);
-    if (keys.length === 0)
-        return;
     // The answer's visible text: text blocks joined (thinking/tool calls
     // are never shown — §8.6).
     const text = answerText(event);
-    // The origin-chat streaming hand-off (Task 6's seam), consulted ONCE
-    // per conversation (before the fan-out): when the stream owned the
-    // ORIGIN chat's delivery, that one key is skipped — the rest of the
-    // fan-out still runs (the seam owns one chat, never the whole set).
-    const streamed = await deps.streams.finalize(conversationId);
+    // The origin-chat streaming hand-off runs ONCE per conversation,
+    // before the fan-out and even when the binding disappeared (the watch
+    // still needs releasing). Only the origin gets its chunks here.
+    const origin = originKeyOf(deps, event);
+    const originChannel = origin === undefined ? undefined : deps.channelOf(origin.channel);
+    const originBinding = origin === undefined ? undefined : deps.bindings.get(origin.bindingKey);
+    const originChunks = originChannel === undefined || originBinding === undefined || originBinding.dead === true || text === ""
+        ? []
+        : renderChunks(text, originChannel.capabilities, originChannel.format);
+    const streamed = await deps.streams.finalize(conversationId, originChunks);
+    if (keys.length === 0)
+        return;
     for (const key of keys) {
         const binding = deps.bindings.get(key);
         if (binding === undefined || binding.dead === true)
@@ -100,7 +106,7 @@ async function fanOutAnswer(event, deps, conversationId) {
         const chunks = text === "" ? [NO_TEXT_REPLY] : renderChunks(text, channel.capabilities, channel.format);
         // The stream owns the ORIGIN chat (the chat the run streamed to):
         // that key is skipped; every other key still enqueues.
-        if (streamed && key === originKeyOf(deps, event)?.bindingKey) {
+        if (streamed && key === origin?.bindingKey) {
             continue;
         }
         for (let index = 0; index < chunks.length; index++) {

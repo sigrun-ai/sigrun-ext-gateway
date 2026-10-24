@@ -37,6 +37,7 @@ import { IdentityStore } from "./state/identities.js";
 import { Ledger } from "./state/ledger.js";
 import { DeliveryWorker } from "./outbound/delivery.js";
 import { onRunSettled } from "./outbound/settled.js";
+import { StreamRegistry } from "./outbound/stream.js";
 import { hashId } from "./log.js";
 /** The engine's own timer defaults (the real world). */
 function defaultTimers() {
@@ -153,6 +154,7 @@ export function createEngine(host, deps = {}) {
             // The ONE engine-wide binding store — the fan-out and the delivery
             // workers share this exact instance (see its declaration).
             bindings,
+            streams,
         });
         pipelines.push(receivePipeline);
         return {
@@ -215,15 +217,24 @@ export function createEngine(host, deps = {}) {
             log: channelLog,
         };
     };
-    // The Task 6 streaming seam's stub (false — no stream owns delivery
-    // yet; Task 6 replaces this closure with the StreamRegistry). Declared
-    // before the deps closure that reads it.
-    const streamsStub = {
-        finalize: async () => false,
-    };
+    // The origin-chat stream registry is engine-wide: pipelines open on
+    // admission, settled runs finalize with rendered chunks, and every
+    // channel lookup resolves against the same supervised contribution set.
+    const streams = new StreamRegistry({
+        host,
+        channelOf: (id) => channels.find((entry) => entry.channel.id === id)?.channel,
+        configOf: async (id) => {
+            const config = await readConfig(host);
+            const block = config.channels[id];
+            return block === undefined || "failed" in block ? undefined : block;
+        },
+        log,
+        now: timers.now,
+        setTimer: timers.setTimer,
+    });
     /** The settled-run fan-out deps (the factory's `runSettled` closes over
      *  these — the same stores the pipelines and commands share, plus the
-     *  delivery ledger and the Task 6 streaming stub). */
+     *  delivery ledger and the stream registry). */
     const settledDeps = () => ({
         host,
         bindings,
@@ -236,7 +247,7 @@ export function createEngine(host, deps = {}) {
             return block === undefined || "failed" in block ? undefined : block;
         },
         origins,
-        streams: streamsStub,
+        streams,
         log,
     });
     const ctxLog = (scope) => ({
@@ -387,6 +398,9 @@ export function createEngine(host, deps = {}) {
             await Promise.all(pending.map((pipeline) => pipeline.flushAlbums()));
         },
         stop: async () => {
+            // A run that never settled (or an intake error) may still own a
+            // watch/timer; shutdown releases every preview before adapters stop.
+            streams.abandonAll();
             // The adapters stop only once every settle has been delivered
             // (the ordering); a stop-before-start resolves (the lazy-start
             // shutdown edge in the handle's contract). The delivery workers

@@ -14,9 +14,9 @@
  *   tool calls are never shown); an answer with NO text blocks gets
  *   the pinned "(no text reply)" notice (Review Focus 4 — an empty
  *   send is a platform rejection, never an honest reply).
- * - The origin-chat streaming hand-off is Task 6's seam
- *   (`deps.streams.finalize`, a no-op stub returning false here);
- *   when the stream owns delivery, no final entries enqueue.
+ * - The origin-chat streaming hand-off runs through `deps.streams`:
+ *   rendered chunks cross to the registry at this layer while the
+ *   boolean answer decides whether the origin's finals enqueue.
  * - An unanswered run notifies the ORIGIN chat only (from
  *   `deps.origins`): the pinned "Stopped." for an abort reason, a
  *   short reason notice otherwise.
@@ -34,18 +34,15 @@ export declare const NO_TEXT_REPLY = "(no text reply)";
 /** The pinned abort notice (spec §8.6: "An abort from /stop produces Stopped."). */
 export declare const STOPPED = "Stopped.";
 /**
- * The streaming hand-off seam (Task 6). `finalize` answers ONE
- * question: did the stream own this conversation's origin-chat
- * delivery? True → the settled path skips the origin chat's finals
- * (the stream already delivered them); the rest of the fan-out still
- * enqueues. Chunks are NOT passed here: rendering is channel-shaped
- * and happens per key inside the fan-out — Task 6's StreamRegistry
- * owns its own `finalize(conversationId, chunks)` shape at its layer
- * and answers through this seam (the engine's stub wires the answer
- * into the fan-out decision).
+ * The streaming hand-off seam. `finalize` answers ONE question: did
+ * the stream own this conversation's origin-chat delivery? Chunks are
+ * rendered by the settled path (which knows the answer and caps) and
+ * consumed by the registry; the boolean-only fan-out decision remains
+ * independent of that delivery work. `abandon` releases unanswered runs.
  */
 export interface Streams {
-    finalize(conversationId: number): Promise<boolean>;
+    finalize(conversationId: number, chunks: string[]): Promise<boolean>;
+    abandon(conversationId: number): void;
 }
 /** onRunSettled's injectable dependencies. */
 export interface SettledDeps {
@@ -62,7 +59,7 @@ export interface SettledDeps {
     readonly configOf: (id: string) => Promise<ChannelConfig | undefined>;
     /** submissionId → the origin record (the unanswered notice's target). */
     readonly origins: Map<SubmissionId, SubmissionOrigin>;
-    /** The Task 6 streaming seam (the stub here). */
+    /** The origin-chat stream registry. */
     readonly streams: Streams;
     readonly log: EngineLog;
 }

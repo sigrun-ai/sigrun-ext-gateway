@@ -85,6 +85,7 @@ export { renderChunks } from "./outbound/render.js";
 export { Ledger, PRUNE_AFTER_MS } from "./state/ledger.js";
 export { DeliveryWorker, RESENT_MARKER } from "./outbound/delivery.js";
 export { onRunSettled, NO_TEXT_REPLY, STOPPED } from "./outbound/settled.js";
+export { StreamRegistry } from "./outbound/stream.js";
 export { Supervisor } from "./supervisor.js";
 export { createStatusRoute } from "./status-route.js";
 export { parseGatewayConfig, readConfig, DEFAULT_MEDIA_MAX_BYTES, } from "./config.js";

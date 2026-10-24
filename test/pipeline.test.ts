@@ -255,7 +255,11 @@ describe("pipeline: allowlisted DM admission", () => {
 		expect(origins.size).toBe(1);
 		const [key, value] = [...origins.entries()][0]!;
 		expect(key).toBe(1);
-		expect(value).toEqual({ bindingKey: "loop:default:dm:100000001", channel: "loop" });
+		expect(value).toEqual({
+			bindingKey: "loop:default:dm:100000001",
+			channel: "loop",
+			chat: { chatId: "100000001", chatType: "dm" },
+		});
 	});
 
 	test("a bound ARCHIVED conversation is unarchived before submit", async () => {
