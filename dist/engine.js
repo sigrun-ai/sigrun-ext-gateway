@@ -378,21 +378,31 @@ export function createEngine(host, deps = {}) {
                     log: createLog(`channel:${id}`),
                 });
                 workers.set(id, worker);
-                // Native menus are a start-time merged catalog (§8.5). Menu
-                // publication is best-effort transport setup: an unsupported
-                // adapter or rejected menu never prevents channel supervision.
+                // The first attempt settles before start resolves (running
+                // or backoff — a failing adapter never wedges boot).
+                await supervisor.start(ctx.signal);
+                // Native menus publish AFTER the adapter start attempt so a
+                // hanging setCommands cannot block supervision. Publication is
+                // bounded and best-effort; there is no retry on later reconnects.
                 if (entry.channel.capabilities.commandMenu === true &&
                     entry.channel.setCommands !== undefined) {
+                    let timeout;
                     try {
-                        await entry.channel.setCommands(await chatCommandMenu(host));
+                        await Promise.race([
+                            entry.channel.setCommands(await chatCommandMenu(host)),
+                            new Promise((_resolve, reject) => {
+                                timeout = setTimeout(() => reject(new Error("command-menu setup timed out")), 5_000);
+                            }),
+                        ]);
                     }
                     catch (error) {
                         log.error(`channel "${id}" command-menu setup failed`, error);
                     }
+                    finally {
+                        if (timeout !== undefined)
+                            clearTimeout(timeout);
+                    }
                 }
-                // The first attempt settles before start resolves (running
-                // or backoff — a failing adapter never wedges boot).
-                await supervisor.start(ctx.signal);
                 // The recovery kick runs only once the ADAPTER is live (or in
                 // backoff): a send before the adapter connected would burn the
                 // entry's first attempt on a transport that cannot take it.

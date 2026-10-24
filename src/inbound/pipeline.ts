@@ -391,6 +391,7 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 				bindingKey: key,
 				user: resolved.user,
 				binding: currentBinding,
+				selfLink: config.selfLink,
 				...(group === undefined ? {} : { group }),
 			},
 		);

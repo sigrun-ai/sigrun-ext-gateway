@@ -605,6 +605,25 @@ describe("pipeline: submit-error outcomes (M12)", () => {
 		expect(channel.sent[0]?.text.length).toBeGreaterThan(0);
 	});
 
+	test("an invalid command arg resolves command and commits seen (no redelivery loop)", async () => {
+		const { host, receive, channel } = await rig();
+		let configureAttempts = 0;
+		host.conversations.configure = (async () => {
+			configureAttempts++;
+			const error = new Error("invalid_field");
+			error.name = "ConversationOpError";
+			Object.assign(error, { body: { error: "invalid_field", field: "model" } });
+			throw error;
+		}) as typeof host.conversations.configure;
+		expect(await receive(dmEvent({ messageId: "bad-model", text: "/model missing-slash" }))).toEqual({ outcome: "command" });
+		expect(channel.sent.at(-1)?.text).toBe("Could not run /model: invalid_field model.");
+		// A platform redelivery dedupes against the committed id rather than
+		// throwing again: configure is never retried and no duplicate notice occurs.
+		expect(await receive(dmEvent({ messageId: "bad-model", text: "/model missing-slash" }))).toEqual({ outcome: "dropped" });
+		expect(configureAttempts).toBe(1);
+		expect(channel.sent.filter((message) => message.text.includes("invalid_field"))).toHaveLength(1);
+	});
+
 	test("an unexpected throw REJECTS receive and releases the seen id", async () => {
 		const { host, receive, submits } = await rig();
 		const error = new Error("synthetic engine failure");

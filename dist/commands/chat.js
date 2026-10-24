@@ -53,6 +53,22 @@ export async function handleChatCommand(deps, ctx) {
     const parsed = parseCommand(ctx.event.text);
     if (parsed === undefined)
         return "not-a-command";
+    try {
+        return await dispatchChatCommand(deps, ctx, parsed);
+    }
+    catch (error) {
+        // User input must not turn an expected op rejection into an engine
+        // failure: the pipeline would release `seen` and the platform would
+        // redeliver the identical invalid command forever (the M12 posture).
+        const notice = expectedCommandError(error, parsed.name);
+        if (notice === undefined)
+            throw error;
+        await reply(deps, ctx, notice);
+        return "command";
+    }
+}
+/** Dispatch after parsing, under the public handler's expected-error boundary. */
+async function dispatchChatCommand(deps, ctx, parsed) {
     const gateway = GATEWAY_COMMANDS.find((command) => command.name === parsed.name);
     if (gateway === undefined) {
         const extension = (await extensionCommands(deps.host)).find((command) => command.name === parsed.name);
@@ -74,6 +90,10 @@ export async function handleChatCommand(deps, ctx) {
     }
     if (gateway.where === "dm" && ctx.event.chat.chatType !== "dm") {
         await reply(deps, ctx, "send this in a direct message");
+        return "command";
+    }
+    if (gateway.name === "link" && !ctx.selfLink) {
+        await reply(deps, ctx, "Self-linking is disabled on this channel.");
         return "command";
     }
     if (gateway.where === "not-anyone-group" && ctx.group?.members === "anyone") {
@@ -153,6 +173,23 @@ export async function handleChatCommand(deps, ctx) {
     }
     return "command";
 }
+/** Map only expected user-input/op failures; all other errors remain engine failures. */
+function expectedCommandError(error, commandName) {
+    if (!(error instanceof Error))
+        return undefined;
+    if (error.name === "ConversationOpError") {
+        const body = error.body;
+        if (isRecord(body) && typeof body.error === "string") {
+            const field = typeof body.field === "string" ? ` ${body.field}` : "";
+            return `Could not run /${commandName}: ${body.error}${field}.`;
+        }
+    }
+    // The host bridge deliberately uses a plain Error for an unknown id.
+    if (commandName === "attach" && /^conversation \d+ not found$/.test(error.message)) {
+        return error.message.endsWith(".") ? error.message : `${error.message}.`;
+    }
+    return undefined;
+}
 /** Parse `/name[@bot] args`; names outside the command grammar stay text. */
 function parseCommand(text) {
     const match = text.match(/^\/([a-z][a-z0-9-]*)(?:@[^\s]+)?(?:\s+([\s\S]*))?$/);
@@ -210,7 +247,7 @@ async function newConversation(deps, ctx) {
 async function stopRun(deps, ctx) {
     await requireBinding(deps, ctx, async (conversationId) => {
         const latest = await latestView(deps.host, conversationId);
-        if (latest?.steer.busy !== true) {
+        if (latest?.steer.busy !== true && (latest?.steer.queued ?? 0) === 0) {
             await reply(deps, ctx, "Nothing is running.");
             return;
         }

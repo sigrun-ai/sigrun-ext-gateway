@@ -51,6 +51,8 @@ export interface ChatCommandContext {
     readonly user: string | undefined;
     readonly binding?: Binding;
     readonly group?: GroupConfig;
+    /** Stage 4 owns redemption when enabled; stage 7 must refuse when disabled. */
+    readonly selfLink: boolean;
 }
 /** The native menu: reserved commands plus non-colliding extension rows. */
 export declare function chatCommandMenu(host: SigrunHost): Promise<readonly {

@@ -196,6 +196,7 @@ export function createPipeline(deps) {
             bindingKey: key,
             user: resolved.user,
             binding: currentBinding,
+            selfLink: config.selfLink,
             ...(group === undefined ? {} : { group }),
         });
         if (command === "command") {

@@ -133,6 +133,7 @@ async function rig(owner = "alice"): Promise<Rig> {
 				bindingKey: bindingKey("loop", chat),
 				user: over.user === undefined ? "alice" : over.user,
 				binding: over.binding ?? binding,
+				selfLink: false,
 				...(over.group === undefined ? {} : { group: over.group }),
 			});
 		},
@@ -265,18 +266,24 @@ describe("chat command behaviors", () => {
 	test("/stop aborts a live run silently and reports an idle run", async () => {
 		const harness = await rig();
 		let busy = true;
-		hostWatch: {
-			harness.host.conversations.watch = (async (id, listener) => {
-				listener(view(busy));
-				return async () => {};
-			}) as typeof harness.host.conversations.watch;
-		}
+		harness.host.conversations.watch = (async (id, listener) => {
+			listener(view(busy));
+			return async () => {};
+		}) as typeof harness.host.conversations.watch;
 		expect(await harness.run("/stop")).toBe("command");
 		expect(harness.sent).toEqual([]);
 		expect(harness.host.calls.some((call) => call.method === "conversations.abort")).toBe(true);
 		busy = false;
 		expect(await harness.run("/stop")).toBe("command");
 		expect(harness.sent.at(-1)?.text).toBe("Nothing is running.");
+	});
+
+	test("/stop also aborts queued work silently", async () => {
+		const harness = await rig();
+		installViews(harness.host, view(false, 1));
+		expect(await harness.run("/stop")).toBe("command");
+		expect(harness.sent).toEqual([]);
+		expect(harness.host.calls.some((call) => call.method === "conversations.abort")).toBe(true);
 	});
 
 	test("/model without args shows the current model and one served model per line", async () => {
@@ -315,6 +322,15 @@ describe("chat command behaviors", () => {
 		expect(text).toContain(String(harness.conversationId));
 	});
 
+	test("selfLink false refuses /link without redeeming a code", async () => {
+		const harness = await rig();
+		const code = harness.deps.linkCodes.issue("alice", "loop", 1_000);
+		expect(await harness.run(`/link ${code}`)).toBe("command");
+		expect(harness.sent.at(-1)?.text).toBe("Self-linking is disabled on this channel.");
+		expect(harness.identities.linkedUserOf("loop", "100000001")).toBeUndefined();
+		expect(harness.deps.linkCodes.peek(code, "loop", 1_000)).toBe("alice");
+	});
+
 	test("/home moves the sender's home chat", async () => {
 		const harness = await rig();
 		await harness.run("/home");
@@ -333,6 +349,40 @@ describe("chat command behaviors", () => {
 		expect(text).toContain("/deploy");
 		expect(text).not.toContain("Collision");
 		expect(text).not.toContain("/fork");
+	});
+});
+
+describe("expected command input errors", () => {
+	test("/model with a malformed ref replies with a notice and resolves command", async () => {
+		const harness = await rig();
+		harness.host.conversations.configure = (async () => {
+			const error = new Error("invalid_field");
+			error.name = "ConversationOpError";
+			Object.assign(error, { body: { error: "invalid_field", field: "model" } });
+			throw error;
+		}) as typeof harness.host.conversations.configure;
+		await expect(harness.run("/model missing-slash")).resolves.toBe("command");
+		expect(harness.sent.at(-1)?.text).toBe("Could not run /model: invalid_field model.");
+	});
+
+	test("/attach of an unknown conversation replies with a notice and does not throw", async () => {
+		const harness = await rig();
+		const originalMeta = harness.host.conversations.meta.bind(harness.host.conversations);
+		harness.host.conversations.meta = (async (id) => {
+			if ((id as number) === 999999) throw new Error("conversation 999999 not found");
+			return originalMeta(id);
+		}) as typeof harness.host.conversations.meta;
+		await expect(harness.run("/attach 999999")).resolves.toBe("command");
+		expect(harness.sent.at(-1)?.text).toBe("conversation 999999 not found.");
+		expect(harness.bindings.get(KEY)?.conversationId).toBe(harness.conversationId);
+	});
+
+	test("unexpected host failures still propagate for platform redelivery", async () => {
+		const harness = await rig();
+		harness.host.conversations.configure = (async () => {
+			throw new Error("synthetic storage failure");
+		}) as typeof harness.host.conversations.configure;
+		await expect(harness.run("/model faux/m")).rejects.toThrow("synthetic storage failure");
 	});
 });
 
