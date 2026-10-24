@@ -240,6 +240,44 @@ describe("DeliveryWorker happy path", () => {
 		await harness.worker.stop();
 	});
 
+	test("a file-resolution rejection fails the entry and the next entry still sends", async () => {
+		const warnings: string[] = [];
+		const errors: string[] = [];
+		const log = {
+			...silentLog(),
+			warn: (message: string) => { warnings.push(message); },
+			error: (message: string) => { errors.push(message); },
+		};
+		const harness = await rig(fakeChannel(), async () => {
+			throw new Error("missing uploads/1/gone.txt");
+		});
+		// Replace the rig worker's silent logger with the observing one.
+		const worker = new DeliveryWorker(harness.channel, harness.ledger, {
+			bindings: harness.bindings,
+			timeoutMs: 60_000,
+			delays: [1000, 5000, 30000],
+			setTimer: harness.clock.setTimer,
+			log,
+			now: harness.clock.now,
+			resolveFiles: async () => { throw new Error("missing uploads/1/gone.txt"); },
+		});
+		await harness.ledger.enqueue({
+			channel: "loop",
+			chat: CHAT,
+			kind: "notice",
+			message: { chat: CHAT, text: "missing file" },
+			files: [{ conversationId: 1, path: "uploads/1/gone.txt", name: "gone.txt" }],
+		});
+		await enqueueFinal(harness, "later");
+		worker.kick();
+		await harness.clock.advance(0);
+		expect(harness.ledger.list().find((entry) => entry.message.text === "missing file")?.state).toBe("failed");
+		expect(harness.channel.sent.map((message) => message.text)).toEqual(["later"]);
+		expect(errors.some((message) => message.includes("gone.txt"))).toBe(true);
+		await worker.stop();
+		await harness.worker.stop();
+	});
+
 	test("drain sends everything pending then resolves", async () => {
 		const harness = await rig();
 		await enqueueFinal(harness, "one");

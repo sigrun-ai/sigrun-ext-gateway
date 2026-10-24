@@ -646,9 +646,11 @@ export function createEngine(
 			const deadline = timers.now() + 30_000;
 			await Promise.all(
 				draining.map(async (worker) => {
-					await worker.drain(deadline).catch(() => {
-						// A drain failure never blocks the stop: the entries stay
-					// queued (the ledger is the source of truth).
+				await worker.drain(deadline).catch((error: unknown) => {
+					// A drain failure never blocks the stop: the entries stay
+					// queued (the ledger is the source of truth), but its
+					// failure remains visible to the operator.
+					log.error("delivery drain failed", error);
 				});
 				await worker.stop();
 			}),

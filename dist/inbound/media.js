@@ -10,6 +10,7 @@ export const ATTACHMENT_FAILED_NOTE = "[attachment failed]";
 export async function collectAttachments(deps, conversationId, attachments, maxBytes, signal) {
     const parts = [];
     const notes = [];
+    const usedNames = new Set();
     for (const attachment of attachments) {
         // The declared size is the cheap gate: an already-oversize object
         // must not even open its platform download stream.
@@ -32,7 +33,7 @@ export async function collectAttachments(deps, conversationId, attachments, maxB
             continue;
         }
         try {
-            const name = uploadName(attachment);
+            const name = uniqueUploadName(uploadName(attachment), usedNames);
             const uploaded = await deps.host.conversations.upload(conversationId, {
                 name,
                 ...(attachment.mime === undefined ? {} : { mime: attachment.mime }),
@@ -52,6 +53,20 @@ export async function collectAttachments(deps, conversationId, attachments, maxB
         }
     }
     return { parts, notes };
+}
+/** Preserve every same-named sibling by appending its batch position. */
+function uniqueUploadName(base, used) {
+    let candidate = base;
+    let suffix = 2;
+    while (used.has(candidate)) {
+        const dot = base.lastIndexOf(".");
+        candidate = dot > 0
+            ? `${base.slice(0, dot)}-${suffix}${base.slice(dot)}`
+            : `${base}-${suffix}`;
+        suffix++;
+    }
+    used.add(candidate);
+    return candidate;
 }
 /** Match adapter errors by name across realms and non-Error throw shapes. */
 function thrownName(error) {

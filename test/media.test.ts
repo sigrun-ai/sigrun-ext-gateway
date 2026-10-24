@@ -16,6 +16,7 @@ import type {
 } from "@sigrun/sigrun/extension";
 import { createFakeHost, type FakeHost } from "./fake-host.js";
 import { collectAttachments, TOO_LARGE_NOTE, VOICE_NOTE } from "../src/inbound/media.js";
+import type { ConversationId } from "@earendil-works/pi-durable";
 import { createPipeline } from "../src/inbound/pipeline.js";
 import { parseGatewayConfig } from "../src/config.js";
 import type { EngineLog } from "../src/log.js";
@@ -182,6 +183,28 @@ describe("pipeline media submission", () => {
 			"uploads/1/image-2.png",
 			"uploads/1/image-3.png",
 		]);
+	});
+
+	test("duplicate album filenames keep distinct paths and bytes", async () => {
+		const host = await createFakeHost();
+		const result = await collectAttachments(
+			{ host, log: LOG },
+			1,
+			[
+				attachment({ kind: "image", filename: "photo.jpg", mime: "image/jpeg", fetch: async () => new Uint8Array([1]) }),
+				attachment({ kind: "image", filename: "photo.jpg", mime: "image/jpeg", fetch: async () => new Uint8Array([2]) }),
+			],
+			1024,
+			new AbortController().signal,
+		);
+		expect(result.parts).toHaveLength(2);
+		const paths = result.parts.map((part) => {
+			if (part.type === "text") throw new Error("unexpected text part");
+			return part.path;
+		});
+		expect(paths[0]).not.toBe(paths[1]);
+		expect((await host.conversations.readFile(1 as ConversationId, paths[0]!)).bytes).toEqual(new Uint8Array([1]));
+		expect((await host.conversations.readFile(1 as ConversationId, paths[1]!)).bytes).toEqual(new Uint8Array([2]));
 	});
 
 	test("a media-only message submits its parts and notes without an empty text part", async () => {

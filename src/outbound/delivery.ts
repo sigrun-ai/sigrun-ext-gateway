@@ -169,8 +169,10 @@ export class DeliveryWorker {
 	 * Never throws.
 	 */
 	private async sendOne(entry: LedgerEntry): Promise<boolean> {
-		const message = await this.buildMessage(entry);
 		try {
+			// Resolution belongs inside the classified boundary: a deleted
+			// or unreadable file must fail this entry, never wedge the queue.
+			const message = await this.buildMessage(entry);
 			// The attempting mark rides the same isolation as the rest: a
 			// failing ledger write is LOGGED and the send does not run (an
 			// unmarked entry must not be sent — the crash window would
@@ -257,8 +259,11 @@ export class DeliveryWorker {
 			return true;
 		}
 		if (kind === "permanent") {
+			const fileDetail = error instanceof Error && error.name === FILE_RESOLUTION_ERROR
+				? ` (${error.message})`
+				: "";
 			this.deps.log.error(
-				`delivery: permanent failure ("${entry.kind}" to "${entry.chat.chatId}")`,
+				`delivery: permanent failure ("${entry.kind}" to "${entry.chat.chatId}")${fileDetail}`,
 				error,
 			);
 			await this.markLedger(entry.id, "failed");
@@ -309,6 +314,9 @@ export class DeliveryWorker {
 	 * transient otherwise) with the timeout error forced transient.
 	 */
 	private classify(error: unknown): "transient" | "permanent" | "chat_gone" {
+		if (error instanceof Error && error.name === FILE_RESOLUTION_ERROR) {
+			return "permanent";
+		}
 		if (
 			error instanceof Error &&
 			error.name === "GatewaySendTimeout"
@@ -329,9 +337,20 @@ export class DeliveryWorker {
 			entry.recovered === true
 				? `${RESENT_MARKER}\n${entry.message.text}`
 				: entry.message.text;
-		const files = entry.message.files === undefined || this.deps.resolveFiles === undefined
-			? undefined
-			: await this.deps.resolveFiles(entry);
+		let files: OutboundMessage["files"];
+		if (entry.message.files !== undefined && this.deps.resolveFiles !== undefined) {
+			try {
+				files = await this.deps.resolveFiles(entry);
+			} catch (error) {
+				const paths = entry.message.files.map((file) => file.path).join(", ");
+				this.deps.log.warn(`delivery: file resolution failed for ${paths}`);
+				const failure = new Error(`file resolution failed for ${paths}`, {
+					cause: error,
+				});
+				failure.name = FILE_RESOLUTION_ERROR;
+				throw failure;
+			}
+		}
 		return {
 			chat: entry.message.chat,
 			text,
@@ -345,6 +364,9 @@ export class DeliveryWorker {
 		};
 	}
 }
+
+/** A workspace file no longer exists/readable; retrying cannot repair it. */
+const FILE_RESOLUTION_ERROR = "GatewayFileResolutionError";
 
 /** The timeout error's name (matched by `classify`, never instanceof). */
 export const SEND_TIMEOUT_NAME = "GatewaySendTimeout";
