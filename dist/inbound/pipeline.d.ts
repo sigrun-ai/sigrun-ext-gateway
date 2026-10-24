@@ -64,14 +64,8 @@ export interface AccessState {
     readonly tokens: ButtonTokens;
     readonly loopGuard: LoopGuard;
 }
-/** The stages later tasks inject (§8.4 steps 7, 8, 9). */
+/** The stages later tasks inject (§8.4 steps 8, 9). */
 export interface PipelineStages {
-    /**
-     * Step 7 (commands): handles gateway chat commands (the bound
-     * conversation id is handed in — commands act on it). Returns an
-     * outcome when consumed, undefined to continue.
-     */
-    readonly command?: (channelId: string, event: InboundEvent, conversationId: number) => Promise<PipelineOutcome | undefined>;
     /** Step 8 (interaction text answers): consumed-or-continue, as above. */
     readonly interactionAnswer?: (channelId: string, event: InboundEvent) => Promise<PipelineOutcome | undefined>;
     /** Step 9 (attachments): render the event's media into submit parts. */
@@ -92,8 +86,11 @@ export interface PipelineDeps {
      *  would interleave JsonFile queues and lose updates). Absent → a
      *  private instance (the stand-alone Task 3 shape). */
     readonly bindings?: BindingStore;
-    /** The injectable stages (§8.4 steps 7, 8, 9). */
+    /** The injectable stages (§8.4 steps 8, 9). */
     readonly stages?: PipelineStages;
+    /** Cross-channel lookup for `/pair` approval notices. Stand-alone
+     *  pipelines fall back to their own adapter. */
+    readonly channelOf?: (channel: string) => ChannelContribution | undefined;
     /** The engine-wide access state (Task 4). Absent → a private one. */
     readonly access?: AccessState;
     /** The origin-chat stream registry (Task 6). Absent in stand-alone

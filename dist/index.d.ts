@@ -64,6 +64,8 @@ export { LoopGuard } from "./access/loop-guard.js";
 export { runPair } from "./commands/pair.js";
 export type { PairCaller, PairDeps } from "./commands/pair.js";
 export { createLinkCommand, redeemLink } from "./commands/link.js";
+export { GATEWAY_COMMANDS, chatCommandMenu, handleChatCommand, } from "./commands/chat.js";
+export type { ChatCommandContext, ChatCommandDeps, GatewayCommand, } from "./commands/chat.js";
 export type { LinkCommand, LinkCommandDeps, LinkDeps, } from "./commands/link.js";
 export { createLog, hashId } from "./log.js";
 export type { EngineLog } from "./log.js";

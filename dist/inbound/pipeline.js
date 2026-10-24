@@ -38,6 +38,7 @@ import { ButtonTokens } from "./tokens.js";
 import { normalizeCode } from "../access/codes.js";
 import { redeemLink } from "../commands/link.js";
 import { approvePairing, denyPairing } from "../commands/pair.js";
+import { handleChatCommand } from "../commands/chat.js";
 /** The pinned UnservedModelError notice (spec §8.4 M12, exact copy). */
 const UNSERVED_MODEL_NOTICE = "The model <ref> is not available. Use /model to pick another.";
 /** The pinned group refusal for `/link` (spec §8.2, exact copy). */
@@ -170,11 +171,36 @@ export function createPipeline(deps) {
                 });
             }
         }
-        // Step 7 — commands (injected; Task 7 fills).
-        const command = await deps.stages?.command?.(channelId, event, conversationId);
-        if (command !== undefined) {
+        // Step 7 — commands run INLINE (§8.5), before album merging and
+        // the busy submission queue. The group config is context only here;
+        // Task 8 owns group admission itself.
+        const groupRow = config.groups.find((row) => row.chat === event.chat.chatId);
+        const group = groupRow === undefined || "failed" in groupRow ? undefined : groupRow;
+        // A first-message command acts on the binding admission just
+        // created, not on the pre-creation `undefined` snapshot.
+        const currentBinding = bindings.get(key) ?? binding;
+        const command = await handleChatCommand({
+            host: deps.host,
+            channel: deps.channel,
+            bindings,
+            identities: access.identities,
+            pairing: access.pairing,
+            linkCodes: access.linkCodes,
+            streams: deps.streams,
+            channelOf: (id) => deps.channelOf?.(id) ?? (id === channelId ? deps.channel : undefined),
+            log: deps.log,
+            now,
+        }, {
+            channel: channelId,
+            event,
+            bindingKey: key,
+            user: resolved.user,
+            binding: currentBinding,
+            ...(group === undefined ? {} : { group }),
+        });
+        if (command === "command") {
             await seen.commit(`${key}:${event.messageId}`, now());
-            return command;
+            return { outcome: "command" };
         }
         // Step 8 — interaction text answers (injected; Task 9 fills).
         const interaction = await deps.stages?.interactionAnswer?.(channelId, event);

@@ -56,6 +56,8 @@ import { ButtonTokens } from "./tokens.js";
 import { normalizeCode } from "../access/codes.js";
 import { redeemLink } from "../commands/link.js";
 import { approvePairing, denyPairing } from "../commands/pair.js";
+import { handleChatCommand } from "../commands/chat.js";
+import type { GroupConfig } from "../config.js";
 
 /** A receive's terminal outcome (the adapter acks on any resolution). */
 export type PipelineOutcome =
@@ -84,18 +86,8 @@ export interface AccessState {
 	readonly loopGuard: LoopGuard;
 }
 
-/** The stages later tasks inject (§8.4 steps 7, 8, 9). */
+/** The stages later tasks inject (§8.4 steps 8, 9). */
 export interface PipelineStages {
-	/**
-	 * Step 7 (commands): handles gateway chat commands (the bound
-	 * conversation id is handed in — commands act on it). Returns an
-	 * outcome when consumed, undefined to continue.
-	 */
-	readonly command?: (
-		channelId: string,
-		event: InboundEvent,
-		conversationId: number,
-	) => Promise<PipelineOutcome | undefined>;
 	/** Step 8 (interaction text answers): consumed-or-continue, as above. */
 	readonly interactionAnswer?: (
 		channelId: string,
@@ -122,8 +114,11 @@ export interface PipelineDeps {
 	 *  would interleave JsonFile queues and lose updates). Absent → a
 	 *  private instance (the stand-alone Task 3 shape). */
 	readonly bindings?: BindingStore;
-	/** The injectable stages (§8.4 steps 7, 8, 9). */
+	/** The injectable stages (§8.4 steps 8, 9). */
 	readonly stages?: PipelineStages;
+	/** Cross-channel lookup for `/pair` approval notices. Stand-alone
+	 *  pipelines fall back to their own adapter. */
+	readonly channelOf?: (channel: string) => ChannelContribution | undefined;
 	/** The engine-wide access state (Task 4). Absent → a private one. */
 	readonly access?: AccessState;
 	/** The origin-chat stream registry (Task 6). Absent in stand-alone
@@ -365,15 +360,43 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 			}
 		}
 
-		// Step 7 — commands (injected; Task 7 fills).
-		const command = await deps.stages?.command?.(
-			channelId,
-			event,
-			conversationId,
+		// Step 7 — commands run INLINE (§8.5), before album merging and
+		// the busy submission queue. The group config is context only here;
+		// Task 8 owns group admission itself.
+		const groupRow = config.groups.find(
+			(row) => row.chat === event.chat.chatId,
 		);
-		if (command !== undefined) {
+		const group: GroupConfig | undefined =
+			groupRow === undefined || "failed" in groupRow ? undefined : groupRow;
+		// A first-message command acts on the binding admission just
+		// created, not on the pre-creation `undefined` snapshot.
+		const currentBinding = bindings.get(key) ?? binding;
+		const command = await handleChatCommand(
+			{
+				host: deps.host,
+				channel: deps.channel,
+				bindings,
+				identities: access.identities,
+				pairing: access.pairing,
+				linkCodes: access.linkCodes,
+				streams: deps.streams,
+				channelOf: (id) =>
+					deps.channelOf?.(id) ?? (id === channelId ? deps.channel : undefined),
+				log: deps.log,
+				now,
+			},
+			{
+				channel: channelId,
+				event,
+				bindingKey: key,
+				user: resolved.user,
+				binding: currentBinding,
+				...(group === undefined ? {} : { group }),
+			},
+		);
+		if (command === "command") {
 			await seen.commit(`${key}:${event.messageId}`, now());
-			return command;
+			return { outcome: "command" };
 		}
 
 		// Step 8 — interaction text answers (injected; Task 9 fills).

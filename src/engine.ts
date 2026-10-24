@@ -46,6 +46,7 @@ import { LoopGuard } from "./access/loop-guard.js";
 import { ButtonTokens } from "./inbound/tokens.js";
 import type { PairDeps } from "./commands/pair.js";
 import { createLinkCommand } from "./commands/link.js";
+import { chatCommandMenu } from "./commands/chat.js";
 import { BindingStore } from "./state/bindings.js";
 import { IdentityStore } from "./state/identities.js";
 import { Ledger } from "./state/ledger.js";
@@ -256,6 +257,8 @@ export function createEngine(
 			// workers share this exact instance (see its declaration).
 			bindings,
 			streams,
+			channelOf: (channelId) =>
+				channels.find((entry) => entry.channel.id === channelId)?.channel,
 		});
 		pipelines.push(receivePipeline);
 		return {
@@ -495,6 +498,19 @@ export function createEngine(
 					log: createLog(`channel:${id}`),
 				});
 				workers.set(id, worker);
+				// Native menus are a start-time merged catalog (§8.5). Menu
+				// publication is best-effort transport setup: an unsupported
+				// adapter or rejected menu never prevents channel supervision.
+				if (
+					entry.channel.capabilities.commandMenu === true &&
+					entry.channel.setCommands !== undefined
+				) {
+					try {
+						await entry.channel.setCommands(await chatCommandMenu(host));
+					} catch (error) {
+						log.error(`channel "${id}" command-menu setup failed`, error);
+					}
+				}
 				// The first attempt settles before start resolves (running
 				// or backoff — a failing adapter never wedges boot).
 				await supervisor.start(ctx.signal);
