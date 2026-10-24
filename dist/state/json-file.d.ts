@@ -21,6 +21,15 @@ export declare class JsonFile<T> {
     /** Read the file (absent → the initial value; malformed → throws naming the path). */
     read(): Promise<T>;
     /**
+     * The synchronous read: the same semantics as {@link read} (absent →
+     * the initial value; malformed → throws naming the path) without the
+     * queue. Stores whose READ API is synchronous (the binding/identity
+     * reads the plan pins) load at construction this way — the queue is
+     * empty then, so nothing can interleave; a queued write's own state
+     * tracking refreshes the store's mirror afterward.
+     */
+    readSync(): T;
+    /**
      * Read-modify-write under the serialization queue: the mutator runs
      * on the CURRENT state, the result is written atomically, and the new
      * state returns. A throwing mutator leaves the file untouched.

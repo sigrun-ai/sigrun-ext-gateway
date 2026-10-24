@@ -15,6 +15,7 @@
 
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 /** A serialized JSON state file at `path`. */
@@ -29,6 +30,34 @@ export class JsonFile<T> {
 	/** Read the file (absent → the initial value; malformed → throws naming the path). */
 	read(): Promise<T> {
 		return this.enqueue(async () => this.readNow());
+	}
+
+	/**
+	 * The synchronous read: the same semantics as {@link read} (absent →
+	 * the initial value; malformed → throws naming the path) without the
+	 * queue. Stores whose READ API is synchronous (the binding/identity
+	 * reads the plan pins) load at construction this way — the queue is
+	 * empty then, so nothing can interleave; a queued write's own state
+	 * tracking refreshes the store's mirror afterward.
+	 */
+	readSync(): T {
+		let text: string | undefined;
+		try {
+			text = readFileSync(this.path, "utf8");
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+				return this.initial();
+			}
+			throw error;
+		}
+		try {
+			return JSON.parse(text) as T;
+		} catch (error) {
+			throw new Error(
+				`gateway: malformed JSON in ${this.path}: ${String(error)}`,
+				{ cause: error },
+			);
+		}
 	}
 
 	/**

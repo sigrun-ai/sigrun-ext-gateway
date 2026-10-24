@@ -466,6 +466,15 @@ export async function createFakeHost(
 			},
 		},
 
+		surfaces: {
+			// The engine declares no surfaces (the status route is a route,
+			// not a view); the host contract's member exists so the shape
+			// is whole.
+			changed: (id: string, key: string) => {
+				record("surfaces.changed", id, key);
+			},
+		},
+
 		models: {
 			list: async () => {
 				record("models.list");

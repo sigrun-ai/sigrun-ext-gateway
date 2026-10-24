@@ -31,5 +31,14 @@ export type { GatewayStatus, StatusPairingRow, StatusRead, } from "./status-rout
 export { parseGatewayConfig, readConfig, DEFAULT_MEDIA_MAX_BYTES, } from "./config.js";
 export type { ChannelConfig, DmPolicy, GatewayConfig, GroupConfig, } from "./config.js";
 export { JsonFile } from "./state/json-file.js";
+export { bindingKey, BindingStore } from "./state/bindings.js";
+export type { Binding } from "./state/bindings.js";
+export { SeenSet } from "./state/seen.js";
+export { IdentityStore } from "./state/identities.js";
+export type { LinkVia, ResolvedUser } from "./state/identities.js";
+export { buildEnvelope } from "./inbound/envelope.js";
+export { createPipeline } from "./inbound/pipeline.js";
+export type { PipelineDeps, PipelineOutcome, PipelineStages, Receive, SubmissionOrigin, } from "./inbound/pipeline.js";
+export { AlbumCollector, ALBUM_WINDOW_MS } from "./inbound/albums.js";
 export { createLog, hashId } from "./log.js";
 export type { EngineLog } from "./log.js";

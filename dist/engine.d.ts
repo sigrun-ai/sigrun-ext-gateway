@@ -13,10 +13,10 @@
  * count (the ledger lands in Task 5; until then the count reads 0
  * through the `failedRecently` dependency).
  *
- * The inbound pipeline (Task 3) is the real consumer of `receive`/
- * `action`: before it lands, an adapter event admitted here is
- * deliberately DROPPED (the outcome the adapter's ack contract treats
- * as safe — dedupe makes a later retry safe).
+ * The inbound pipeline (Task 3) drives `receive` (§8.4): the config
+ * block is read LIVE per event, admission runs the ordered steps, and
+ * the supervisor counts every outcome. `action` (button taps) stays a
+ * no-op until the token table lands (Tasks 4/9).
  *
  * `EngineInternals` is the test/task-internal surface (the state-dir
  * path, the status read) — NOT part of the loader contract, which sees

@@ -13,10 +13,10 @@
  * count (the ledger lands in Task 5; until then the count reads 0
  * through the `failedRecently` dependency).
  *
- * The inbound pipeline (Task 3) is the real consumer of `receive`/
- * `action`: before it lands, an adapter event admitted here is
- * deliberately DROPPED (the outcome the adapter's ack contract treats
- * as safe — dedupe makes a later retry safe).
+ * The inbound pipeline (Task 3) drives `receive` (§8.4): the config
+ * block is read LIVE per event, admission runs the ordered steps, and
+ * the supervisor counts every outcome. `action` (button taps) stays a
+ * no-op until the token table lands (Tasks 4/9).
  *
  * `EngineInternals` is the test/task-internal surface (the state-dir
  * path, the status read) — NOT part of the loader contract, which sees
@@ -26,6 +26,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { readConfig } from "./config.js";
 import { createLog } from "./log.js";
+import { createPipeline } from "./inbound/pipeline.js";
 import { Supervisor, } from "./supervisor.js";
 /** The engine's own timer defaults (the real world). */
 function defaultTimers() {
@@ -68,31 +69,69 @@ export function createEngine(host, deps = {}) {
     const supervisors = new Map();
     // Static rows for channels that never reach a supervisor, keyed id.
     const staticRows = new Map();
+    // submissionId → the origin record (Task 3's pipeline writes; the
+    // outbound tasks read). One map per ENGINE (shared across channels).
+    const origins = new Map();
     let started = false;
     // The engine-owned half of every adapter context (Task 3's pipeline
-    // replaces the drop stubs; the shape lands here so the supervisor's
-    // makeContext seam stays stable). `supervisorOf` is resolved lazily —
-    // the context is built only during a start ATTEMPT, after the
-    // supervisor exists (a direct reference would hit the TDZ at
-    // construction).
+    // drives `receive`; the supervisor's makeContext seam stays stable).
+    // `supervisorOf` is resolved lazily — the context is built only during
+    // a start ATTEMPT, after the supervisor exists (a direct reference
+    // would hit the TDZ at construction).
     const makeContext = (_signal, report, supervisorOf, 
     /** The channel id — per-channel log attribution (Task 1's
      *  `channel:${id}` scoping; a bare "channel" scope loses which
      *  adapter a line came from). */
     id) => {
         const channelLog = ctxLog(`channel:${id}`);
+        // ONE pipeline per engine (the state stores are shared; the
+        // binding key carries the channel): every channel's receive runs
+        // through it with ITS channel id and adapter. The pipeline's
+        // origins map is the engine's outbound seam (Task 5 reads it).
+        const channelEntry = channels.find((entry) => entry.channel.id === id);
+        if (channelEntry === undefined) {
+            // makeContext runs only inside a start attempt over a recorded
+            // channel; reaching here means the supervisor wiring diverged.
+            throw new Error(`gateway: channel "${id}" context built without its contribution`);
+        }
+        const receivePipeline = createPipeline({
+            host,
+            channel: channelEntry.channel,
+            stateDir: gatewayDir,
+            log: channelLog,
+            origins,
+        });
         return {
             signal: _signal,
-            // The three stubs below deliberately no-op/drop: the inbound
-            // pipeline (Task 3) is the real consumer — before it lands, an
-            // adapter event admitted here would be silently processed twice
-            // or lost, so the honest engine DROPS (the outcome the
-            // adapter's ack contract treats as safe: dedupe makes a later
-            // retry safe). The supervisor still counts the outcome — the
-            // status route's counts are live from day one.
-            receive: async () => {
-                supervisorOf().countDropped();
-                return { outcome: "dropped" };
+            // The §8.4 pipeline: the config block is read LIVE per event
+            // (every field but `enabled` is per-event); a `{failed}` or
+            // absent block drops (the channel's enablement was read once at
+            // start — a supervised channel whose config went bad drops
+            // events until its next restart).
+            receive: async (event) => {
+                try {
+                    const config = await readConfig(host);
+                    const block = config.channels[id];
+                    if (block === undefined || "failed" in block) {
+                        supervisorOf().countDropped();
+                        return { outcome: "dropped" };
+                    }
+                    const outcome = await receivePipeline(id, event, block);
+                    if (outcome.outcome === "admitted") {
+                        supervisorOf().countAdmitted();
+                    }
+                    else if (outcome.outcome === "dropped") {
+                        supervisorOf().countDropped();
+                    }
+                    return outcome;
+                }
+                catch (error) {
+                    // An engine failure (the §8.4 contract): the adapter does
+                    // not ack, the platform redelivers, and the supervisor's
+                    // counts stay honest (no admission claimed).
+                    channelLog.error("receive failed", error);
+                    throw error;
+                }
             },
             // Button taps have no token table until Task 4/9 — swallow.
             action: async () => { },
@@ -185,9 +224,11 @@ export function createEngine(host, deps = {}) {
             }
         },
         stopIntake: async () => {
-            // Intake closes before the shutdown drain (the ordering); Task 1
-            // has no intake machinery yet — admission-level wiring lands with
-            // the inbound pipeline (Task 3).
+            // Intake closes before the shutdown drain (the ordering). The
+            // Task 3 pipeline has no long-lived intake machinery (every
+            // receive settles with its outcome); the album close timers —
+            // the one deferred submission path — are awaited by `stop`'s
+            // supervisor drain via each adapter's stop.
         },
         stop: async () => {
             // The adapters stop only once every settle has been delivered
