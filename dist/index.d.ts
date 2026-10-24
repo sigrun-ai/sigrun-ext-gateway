@@ -52,7 +52,7 @@ export { IdentityStore } from "./state/identities.js";
 export type { LinkVia, ResolvedUser } from "./state/identities.js";
 export { buildEnvelope } from "./inbound/envelope.js";
 export { createPipeline } from "./inbound/pipeline.js";
-export type { AccessState, PipelineDeps, PipelineOutcome, PipelineStages, Receive, SubmissionOrigin, } from "./inbound/pipeline.js";
+export type { AccessState, PipelineDeps, PipelineOutcome, PipelineStreams, PipelineStages, Receive, SubmissionOrigin, } from "./inbound/pipeline.js";
 export { AlbumCollector, ALBUM_WINDOW_MS } from "./inbound/albums.js";
 export { ButtonTokens } from "./inbound/tokens.js";
 export type { TokenAction } from "./inbound/tokens.js";

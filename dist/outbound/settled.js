@@ -50,7 +50,9 @@ async function run(event, deps) {
         await fanOutAnswer(event, deps, conversationId);
         return;
     }
-    deps.streams.abandon(conversationId);
+    if (originKeyOf(deps, event) !== undefined) {
+        deps.streams.abandon(conversationId);
+    }
     await notifyOrigin(event, deps);
 }
 /** The answered fan-out: every live bound key, access-checked. */
@@ -68,7 +70,11 @@ async function fanOutAnswer(event, deps, conversationId) {
     const originChunks = originChannel === undefined || originBinding === undefined || originBinding.dead === true || text === ""
         ? []
         : renderChunks(text, originChannel.capabilities, originChannel.format);
-    const streamed = await deps.streams.finalize(conversationId, originChunks);
+    // Foreign settles (webui/jobs) still fan out finals, but must not tear
+    // down the gateway-originated run's live preview.
+    const streamed = origin === undefined
+        ? false
+        : await deps.streams.finalize(conversationId, originChunks);
     if (keys.length === 0)
         return;
     for (const key of keys) {

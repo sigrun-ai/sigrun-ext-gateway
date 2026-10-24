@@ -22,7 +22,10 @@ export class StreamRegistry {
         });
     }
     async open(conversationId, origin) {
-        this.abandon(conversationId);
+        // One preview per conversation: a second admission is final-only;
+        // abandoning here would freeze the owning run's streamed partial.
+        if (this.active.has(conversationId) || this.openings.has(conversationId))
+            return;
         const opening = {};
         this.openings.set(conversationId, opening);
         const channel = this.deps.channelOf(origin.channel);
@@ -73,6 +76,7 @@ export class StreamRegistry {
             this.startTyping(state);
     }
     async finalize(conversationId, chunks) {
+        this.openings.delete(conversationId);
         const state = this.active.get(conversationId);
         if (state === undefined)
             return false;
@@ -85,6 +89,8 @@ export class StreamRegistry {
         if (state.failed || state.message === undefined || chunks.length === 0)
             return false;
         try {
+            // At-least-once: a failed tail send re-delivers all chunks fresh,
+            // the cost of the ledger fallback (chunk 1 may duplicate).
             await this.edit(state, chunks[0]);
             for (const chunk of chunks.slice(1)) {
                 await state.channel.send({ chat: state.origin.chat, text: chunk });
@@ -133,6 +139,8 @@ export class StreamRegistry {
         state.cancelTyping = this.setTimer(pulse, interval);
     }
     async preview(state, text) {
+        // Raw cumulative text preserves prefix-stability; re-formatting is
+        // reserved for the authoritative final through renderChunks.
         if (state.closed || state.failed || state.channel.capabilities.edit === undefined)
             return;
         if (stripMarkdown(text).trim().length < FIRST_SEND_VISIBLE_CHARS)

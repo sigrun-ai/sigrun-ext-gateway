@@ -161,6 +161,29 @@ describe("StreamRegistry edit streaming", () => {
 			const owned = await harness.registry.finalize(7, ["The settled answer, not the preview"]);
 			expect(owned).toBe(true);
 			expect(harness.edits.at(-1)?.message.text).toBe("The settled answer, not the preview");
+			harness.host.pushView(7 as ConversationId, liveView("Hello world, this is long enough after release"));
+			await vi.advanceTimersByTimeAsync(200);
+			expect(harness.edits.at(-1)?.message.text).toBe("The settled answer, not the preview");
+		} finally {
+			await harness.close();
+		}
+	});
+
+	test("reopening a live conversation is a no-op and its owning settle replaces the partial", async () => {
+		vi.useFakeTimers();
+		const harness = await rig();
+		try {
+			await harness.registry.open(7, ORIGIN);
+			harness.host.pushView(7 as ConversationId, liveView("Hello world, this is"));
+			await vi.advanceTimersByTimeAsync(0);
+			expect(harness.sent).toHaveLength(1);
+			await harness.registry.open(7, ORIGIN);
+			harness.host.pushView(7 as ConversationId, liveView("Hello world, this is still live"));
+			await vi.advanceTimersByTimeAsync(100);
+			expect(harness.edits.at(-1)?.message.text).toBe("Hello world, this is still live");
+			expect(harness.sent).toHaveLength(1);
+			expect(await harness.registry.finalize(7, ["First run's settled answer"])).toBe(true);
+			expect(harness.edits.at(-1)?.message.text).toBe("First run's settled answer");
 		} finally {
 			await harness.close();
 		}

@@ -43,7 +43,7 @@ import type {
 } from "@earendil-works/pi-durable";
 import type { ChannelConfig } from "../config.js";
 import type { EngineLog } from "../log.js";
-import type { StreamRegistry } from "../outbound/stream.js";
+import type { StreamOrigin } from "../outbound/stream.js";
 import { buildEnvelope } from "./envelope.js";
 import { AlbumCollector, ALBUM_WINDOW_MS } from "./albums.js";
 import { bindingKey, BindingStore } from "../state/bindings.js";
@@ -67,11 +67,7 @@ export type PipelineOutcome =
  * The origin record: which chat a submission came from. The outbound
  * tasks (streaming hand-off, unanswered notices) read it.
  */
-export interface SubmissionOrigin {
-	readonly bindingKey: string;
-	readonly channel: string;
-	readonly chat: ChatRef;
-}
+export interface SubmissionOrigin extends StreamOrigin {}
 
 /**
  * The engine-wide access state (Task 4): every store the access steps
@@ -132,9 +128,15 @@ export interface PipelineDeps {
 	readonly access?: AccessState;
 	/** The origin-chat stream registry (Task 6). Absent in stand-alone
 	 *  pipeline tests disables streaming; the engine always wires it. */
-	readonly streams?: StreamRegistry;
+	readonly streams?: PipelineStreams;
 	/** The clock (tests inject a fake). Default: real. */
 	readonly now?: () => number;
+}
+
+/** The pipeline's narrow stream seam; StreamRegistry and test fakes fit it. */
+export interface PipelineStreams {
+	open(conversationId: number, origin: StreamOrigin): Promise<void>;
+	abandon(conversationId: number): void;
 }
 
 /** The pinned UnservedModelError notice (spec §8.4 M12, exact copy). */

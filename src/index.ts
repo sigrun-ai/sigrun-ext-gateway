@@ -135,6 +135,7 @@ export type {
 	AccessState,
 	PipelineDeps,
 	PipelineOutcome,
+	PipelineStreams,
 	PipelineStages,
 	Receive,
 	SubmissionOrigin,

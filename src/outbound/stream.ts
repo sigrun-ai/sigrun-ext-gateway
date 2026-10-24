@@ -67,7 +67,9 @@ export class StreamRegistry implements Streams {
 	}
 
 	async open(conversationId: number, origin: StreamOrigin): Promise<void> {
-		this.abandon(conversationId);
+		// One preview per conversation: a second admission is final-only;
+		// abandoning here would freeze the owning run's streamed partial.
+		if (this.active.has(conversationId) || this.openings.has(conversationId)) return;
 		const opening = {};
 		this.openings.set(conversationId, opening);
 		const channel = this.deps.channelOf(origin.channel);
@@ -119,6 +121,7 @@ export class StreamRegistry implements Streams {
 	}
 
 	async finalize(conversationId: number, chunks: string[]): Promise<boolean> {
+		this.openings.delete(conversationId);
 		const state = this.active.get(conversationId);
 		if (state === undefined) return false;
 		this.active.delete(conversationId);
@@ -129,6 +132,8 @@ export class StreamRegistry implements Streams {
 		await state.operations;
 		if (state.failed || state.message === undefined || chunks.length === 0) return false;
 		try {
+			// At-least-once: a failed tail send re-delivers all chunks fresh,
+			// the cost of the ledger fallback (chunk 1 may duplicate).
 			await this.edit(state, chunks[0]!);
 			for (const chunk of chunks.slice(1)) {
 				await state.channel.send({ chat: state.origin.chat, text: chunk });
@@ -175,6 +180,8 @@ export class StreamRegistry implements Streams {
 	}
 
 	private async preview(state: ActiveStream, text: string): Promise<void> {
+		// Raw cumulative text preserves prefix-stability; re-formatting is
+		// reserved for the authoritative final through renderChunks.
 		if (state.closed || state.failed || state.channel.capabilities.edit === undefined) return;
 		if (stripMarkdown(text).trim().length < FIRST_SEND_VISIBLE_CHARS) return;
 		if (state.lastSent !== undefined && !text.startsWith(state.lastSent)) return;

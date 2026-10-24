@@ -513,6 +513,39 @@ describe("engine stopIntake: the album flush (Review finding 1)", () => {
 	});
 });
 
+describe("pipeline: streaming seam", () => {
+	test("opens the stream before submit and abandons it when submit throws", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "sigrun-gw-pipeline-"));
+		cleanups.push(() => rm(dir, { recursive: true, force: true }));
+		const host = await createFakeHost({ storesDir: dir, users: [{ user: "alice", admin: true }] });
+		const calls: string[] = [];
+		const submit = host.conversations.submit.bind(host.conversations);
+		host.conversations.submit = (async (...args: Parameters<typeof submit>) => {
+			calls.push("submit");
+			return submit(...args);
+		}) as typeof host.conversations.submit;
+		const raw = createPipeline({
+			host,
+			channel: fakeChannel(),
+			stateDir: dir,
+			log: silentLog(),
+			origins: new Map(),
+			streams: {
+				open: async () => { calls.push("open"); },
+				abandon: () => { calls.push("abandon"); },
+			},
+		});
+		const parsed = parseGatewayConfig({
+			channels: { loop: { dm: "allowlist", allow: [{ sender: "100000001", user: "alice" }] } },
+		}).channels.loop as import("../src/config.js").ChannelConfig;
+		await raw("loop", dmEvent({ messageId: "stream-order" }), parsed);
+		expect(calls).toEqual(["open", "submit"]);
+		failNextSubmit(host, new Error("synthetic submit failure"));
+		await expect(raw("loop", dmEvent({ messageId: "stream-failure" }), parsed)).rejects.toThrow("synthetic submit failure");
+		expect(calls).toEqual(["open", "submit", "open", "abandon"]);
+	});
+});
+
 describe("pipeline: submit-error outcomes (M12)", () => {
 	test("UnservedModelError replies the pinned notice and resolves dropped", async () => {
 		const { host, receive, channel, submits } = await rig();

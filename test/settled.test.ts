@@ -416,6 +416,39 @@ describe("onRunSettled: the streaming hand-off", () => {
 		expect(harness.ledger.nextPending("loop")?.message.text).toBe("the answer");
 	});
 
+	test("a foreign answered settle never finalizes the gateway's live stream", async () => {
+		const harness = await rig();
+		await harness.bindings.bind(KEY, 7, CHAT);
+		let finalizeCalls = 0;
+		const deps: SettledDeps = {
+			...harness.deps,
+			streams: {
+				finalize: async () => {
+					finalizeCalls++;
+					return false;
+				},
+				abandon: () => {},
+			},
+		};
+		await onRunSettled(answeredEvent(7, "foreign answer"), deps);
+		expect(finalizeCalls).toBe(0);
+		expect(harness.ledger.nextPending("loop")?.message.text).toBe("foreign answer");
+	});
+
+	test("a foreign unanswered settle never abandons the gateway's live stream", async () => {
+		const harness = await rig();
+		let abandonCalls = 0;
+		const deps: SettledDeps = {
+			...harness.deps,
+			streams: {
+				finalize: async () => false,
+				abandon: () => { abandonCalls++; },
+			},
+		};
+		await onRunSettled(unansweredEvent(7, "model_error"), deps);
+		expect(abandonCalls).toBe(0);
+	});
+
 	test("finalize owning the stream skips only the ORIGIN chat; other bound chats still enqueue (review fix 5)", async () => {
 		const harness = await rig();
 		const otherChat: ChatRef = { chatId: "200000002", chatType: "dm" };
