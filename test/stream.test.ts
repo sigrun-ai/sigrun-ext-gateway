@@ -178,13 +178,48 @@ describe("StreamRegistry edit streaming", () => {
 			harness.host.pushView(7 as ConversationId, liveView("Hello world, this is"));
 			await vi.advanceTimersByTimeAsync(0);
 			expect(harness.sent).toHaveLength(1);
-			await harness.registry.open(7, ORIGIN);
+			expect(await harness.registry.open(7, ORIGIN)).toBe(false);
 			harness.host.pushView(7 as ConversationId, liveView("Hello world, this is still live"));
 			await vi.advanceTimersByTimeAsync(100);
 			expect(harness.edits.at(-1)?.message.text).toBe("Hello world, this is still live");
 			expect(harness.sent).toHaveLength(1);
 			expect(await harness.registry.finalize(7, ["First run's settled answer"])).toBe(true);
 			expect(harness.edits.at(-1)?.message.text).toBe("First run's settled answer");
+		} finally {
+			await harness.close();
+		}
+	});
+
+	test("a failed watch releases the opening slot so a retry can succeed", async () => {
+		vi.useFakeTimers();
+		const harness = await rig();
+		const watch = harness.host.conversations.watch.bind(harness.host.conversations);
+		let fail = true;
+		harness.host.conversations.watch = (async (...args: Parameters<typeof watch>) => {
+			if (fail) {
+				fail = false;
+				throw new Error("synthetic watch failure");
+			}
+			return watch(...args);
+		}) as typeof harness.host.conversations.watch;
+		try {
+			await expect(harness.registry.open(7, ORIGIN)).rejects.toThrow("synthetic watch failure");
+			expect(await harness.registry.open(7, ORIGIN)).toBe(true);
+		} finally {
+			await harness.close();
+		}
+	});
+
+	test("an absent channel config makes open return false", async () => {
+		const harness = await rig();
+		const registry = new StreamRegistry({
+			host: harness.host,
+			channelOf: () => undefined,
+			configOf: async () => undefined,
+			log: silentLog([]),
+		});
+		try {
+			expect(await registry.open(7, ORIGIN)).toBe(false);
 		} finally {
 			await harness.close();
 		}
