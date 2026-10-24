@@ -189,19 +189,22 @@ async function fanOutAnswer(
 		const meta = await deps.host.conversations.meta(
 			conversationId as ConversationId,
 		);
-		// A removed group row pauses that group; it does not revoke the
-		// binding. This matches inbound admission and preserves continuity
-		// if the operator restores the row. A malformed row still reaches
-		// the genuine unresolvable-user path below.
+		// A removed or malformed group row pauses that group; neither revokes
+		// the binding. This matches inbound admission and preserves continuity
+		// if the operator restores or repairs the row. Only a valid row whose
+		// owner is genuinely unresolvable reaches the unbind path below.
+		const group = binding.chat.chatType === "dm"
+			? undefined
+			: config.groups.find((entry) => entry.chat === binding.chat.chatId);
 		if (
 			binding.chat.chatType !== "dm" &&
-			!config.groups.some((group) => group.chat === binding.chat.chatId)
+			(group === undefined || "failed" in group)
 		) {
 			deps.log.warn(
-				`settled: group config absent for binding "${hashId(key)}" — skipped, binding kept`,
+				`settled: group config absent or invalid for binding "${hashId(key)}" — skipped, binding kept`,
 			);
 			deps.log.debug(
-				`settled: group config absent for binding "${key}" — skipped, binding kept`,
+				`settled: group config absent or invalid for binding "${key}" — skipped, binding kept`,
 			);
 			continue;
 		}

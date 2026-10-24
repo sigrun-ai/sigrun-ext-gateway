@@ -281,6 +281,25 @@ describe("supervision (createEngine + fake timers)", () => {
 		await engine.stop();
 	});
 
+	test("a backoff retry after stopIntake cannot reject, and stop still completes", async () => {
+		const host = await fakeHost();
+		const adapter = fakeAdapter("loop");
+		adapter.failNextStart = true;
+		const time = new FakeTime();
+		const engine = createEngine(host, { timers: fakeTimers(time) });
+		await engine.start(engineCtx([
+			{ extension: "fixture", channel: adapter },
+		]));
+		expect(engine.status().channels.loop?.state).toBe("backoff");
+		await engine.stopIntake();
+		// The armed retry runs before stop() aborts the channel, matching
+		// the real drain window. Its context must reuse the retained pipeline.
+		await time.advance(1000);
+		expect(adapter.contexts).toHaveLength(2);
+		await engine.stop();
+		expect(engine.status().channels.loop?.state).toBe("stopped");
+	});
+
 	test("delivery and terminal-failure outcomes update status counts", async () => {
 		const host = await fakeHost();
 		const adapter = fakeAdapter("loop");

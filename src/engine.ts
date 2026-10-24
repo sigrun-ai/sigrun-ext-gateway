@@ -668,8 +668,11 @@ export function createEngine(
 			// platform's redelivery would dedupe to a no-op and the album
 			// would be lost). One failed album's flush is logged and never
 			// strands the others (flushAlbums drains every group).
+			// Keep the handles through the shutdown drain: a supervision retry
+			// may still call makeContext before stop() aborts the channel. Album
+			// flushing is idempotent, so clearing the map buys nothing and would
+			// turn that retry into an unhandled rejection.
 			const pending = [...pipelines.values()];
-			pipelines.clear();
 			await Promise.all(pending.map((pipeline) => pipeline.flushAlbums()));
 			// Close only after the album flush: those events already committed
 			// their dedupe ids and must be admitted before new intake is refused.

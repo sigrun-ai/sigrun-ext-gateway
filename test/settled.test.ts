@@ -315,6 +315,30 @@ describe("onRunSettled: access re-check (M7)", () => {
 		expect(warnings.some((line) => line.includes("group config absent") && line.includes("binding kept"))).toBe(true);
 	});
 
+	test("a malformed group config skips delivery and retains the binding", async () => {
+		const harness = await rig();
+		const conversationId = (await harness.host.conversations.create({
+			owner: "alice",
+		})) as number;
+		const chat: ChatRef = { chatId: "-100000000002", chatType: "group" };
+		const key = bindingKey("loop", chat);
+		await harness.bindings.bind(key, conversationId, chat);
+		const warnings: string[] = [];
+		const deps: SettledDeps = {
+			...harness.deps,
+			configOf: async () => parseGatewayConfig({
+				channels: { loop: { groups: [{ chat: chat.chatId }] } },
+			}).channels.loop as ChannelConfig,
+			log: { ...silentLog(), warn: (message) => warnings.push(message) },
+		};
+		await onRunSettled(answeredEvent(conversationId, "kept"), deps);
+		expect(harness.bindings.get(key)).toBeDefined();
+		expect(harness.ledger.nextPending("loop")).toBeUndefined();
+		expect(warnings.some((line) =>
+			line.includes("group config absent or invalid") && line.includes("binding kept"),
+		)).toBe(true);
+	});
+
 	test("an unresolvable user with a channel config still unbinds", async () => {
 		const harness = await rig();
 		const conversationId = (await harness.host.conversations.create({
