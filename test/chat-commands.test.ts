@@ -377,6 +377,38 @@ describe("expected command input errors", () => {
 		expect(harness.bindings.get(KEY)?.conversationId).toBe(harness.conversationId);
 	});
 
+	test("/attach rejects an unsafe integer id without any host lookup", async () => {
+		const harness = await rig();
+		let metaCalls = 0;
+		const originalMeta = harness.host.conversations.meta.bind(harness.host.conversations);
+		harness.host.conversations.meta = (async (id) => {
+			metaCalls++;
+			if ((id as number) !== harness.conversationId) {
+				throw new Error("unexpected target host lookup");
+			}
+			return originalMeta(id);
+		}) as typeof harness.host.conversations.meta;
+		await expect(harness.run("/attach 1111111111111111111111")).resolves.toBe("command");
+		expect(harness.sent.at(-1)?.text).toBe("Unknown conversation.");
+		// Only the pre-command access check may read meta; the unsafe target
+		// itself must never reach the host.
+		expect(metaCalls).toBe(1);
+		expect(harness.bindings.get(KEY)?.conversationId).toBe(harness.conversationId);
+	});
+
+	test("/attach classifies exponential bridge not-found formatting", async () => {
+		const harness = await rig();
+		const originalMeta = harness.host.conversations.meta.bind(harness.host.conversations);
+		harness.host.conversations.meta = (async (id) => {
+			if ((id as number) === 9007199254740991) {
+				throw new Error("conversation 1.1111111111111111e+21 not found");
+			}
+			return originalMeta(id);
+		}) as typeof harness.host.conversations.meta;
+		await expect(harness.run("/attach 9007199254740991")).resolves.toBe("command");
+		expect(harness.sent.at(-1)?.text).toBe("conversation 1.1111111111111111e+21 not found.");
+	});
+
 	test("unexpected host failures still propagate for platform redelivery", async () => {
 		const harness = await rig();
 		harness.host.conversations.configure = (async () => {

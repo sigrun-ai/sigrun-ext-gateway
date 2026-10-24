@@ -624,6 +624,29 @@ describe("pipeline: submit-error outcomes (M12)", () => {
 		expect(channel.sent.filter((message) => message.text.includes("invalid_field"))).toHaveLength(1);
 	});
 
+	test("an oversized /attach id resolves command and commits seen without a host lookup", async () => {
+		const { host, receive, channel } = await rig();
+		let metaAttempts = 0;
+		const originalMeta = host.conversations.meta.bind(host.conversations);
+		host.conversations.meta = (async (id) => {
+			metaAttempts++;
+			return originalMeta(id);
+		}) as typeof host.conversations.meta;
+		expect(await receive(dmEvent({
+			messageId: "oversized-attach",
+			text: "/attach 1111111111111111111111",
+		}))).toEqual({ outcome: "command" });
+		expect(channel.sent.at(-1)?.text).toBe("Unknown conversation.");
+		expect(await receive(dmEvent({
+			messageId: "oversized-attach",
+			text: "/attach 1111111111111111111111",
+		}))).toEqual({ outcome: "dropped" });
+		// One read for the bound conversation's access check; zero for the
+		// rejected target id.
+		expect(metaAttempts).toBe(1);
+		expect(channel.sent.filter((message) => message.text === "Unknown conversation.")).toHaveLength(1);
+	});
+
 	test("an unexpected throw REJECTS receive and releases the seen id", async () => {
 		const { host, receive, submits } = await rig();
 		const error = new Error("synthetic engine failure");

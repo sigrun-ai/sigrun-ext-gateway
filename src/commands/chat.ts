@@ -277,7 +277,7 @@ function expectedCommandError(error: unknown, commandName: string): string | und
 		}
 	}
 	// The host bridge deliberately uses a plain Error for an unknown id.
-	if (commandName === "attach" && /^conversation \d+ not found$/.test(error.message)) {
+	if (commandName === "attach" && /^conversation .+ not found$/.test(error.message)) {
 		return error.message.endsWith(".") ? error.message : `${error.message}.`;
 	}
 	return undefined;
@@ -432,7 +432,14 @@ async function attachConversation(
 		await reply(deps, ctx, "usage: /attach <conversation-id>");
 		return;
 	}
-	const conversationId = Number(args) as ConversationId;
+	const numericId = Number(args);
+	// Numeric conversion above 2^53 loses identity, and >=1e21 formats in
+	// exponential notation. Reject before any host lookup or ConversationId cast.
+	if (!Number.isSafeInteger(numericId)) {
+		await reply(deps, ctx, "Unknown conversation.");
+		return;
+	}
+	const conversationId = numericId as ConversationId;
 	const meta = await deps.host.conversations.meta(conversationId);
 	const access = await deps.host.access.accessOf(
 		{ user: ctx.user },
