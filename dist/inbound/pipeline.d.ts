@@ -112,8 +112,8 @@ export interface PipelineStreams {
 export type Receive = (channelId: string, event: InboundEvent, config: ChannelConfig) => Promise<PipelineOutcome>;
 /**
  * A pipeline's receive, carrying the engine-owned flush handle and the
- * tap handler: ONE pipeline per engine (the state stores are shared
- * across channels; the binding key carries the channel) — the engine
+ * tap handler: ONE pipeline per supervised channel (the binding key
+ * carries the channel) — the engine
  * wires every supervised channel's `ChannelContext.receive` through
  * the callable, calls `flushAlbums` from its `stopIntake`, and routes
  * `ChannelContext.action` through `action`.

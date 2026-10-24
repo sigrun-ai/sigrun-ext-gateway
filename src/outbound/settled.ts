@@ -32,7 +32,7 @@ import type { SubmissionId, ConversationId } from "@earendil-works/pi-durable";
 import type { ChannelConfig } from "../config.js";
 import type { BindingStore } from "../state/bindings.js";
 import type { Ledger } from "../state/ledger.js";
-import type { EngineLog } from "../log.js";
+import { hashId, type EngineLog } from "../log.js";
 import type { IdentityStore } from "../state/identities.js";
 import { renderChunks } from "./render.js";
 import type { SubmissionOrigin } from "../inbound/pipeline.js";
@@ -165,6 +165,9 @@ async function fanOutAnswer(
 		const channel = channelOfFor(deps, key);
 		if (channel === undefined) {
 			deps.log.warn(
+				`settled: no channel adapter for binding "${hashId(key)}" — skipped, binding kept`,
+			);
+			deps.log.debug(
 				`settled: no channel adapter for binding "${key}" — skipped, binding kept`,
 			);
 			continue;
@@ -172,6 +175,9 @@ async function fanOutAnswer(
 		const config = await deps.configOf(key.split(":")[0] ?? "");
 		if (config === undefined) {
 			deps.log.warn(
+				`settled: channel config unavailable for binding "${hashId(key)}" — skipped, binding kept`,
+			);
+			deps.log.debug(
 				`settled: channel config unavailable for binding "${key}" — skipped, binding kept`,
 			);
 			continue;
@@ -183,6 +189,22 @@ async function fanOutAnswer(
 		const meta = await deps.host.conversations.meta(
 			conversationId as ConversationId,
 		);
+		// A removed group row pauses that group; it does not revoke the
+		// binding. This matches inbound admission and preserves continuity
+		// if the operator restores the row. A malformed row still reaches
+		// the genuine unresolvable-user path below.
+		if (
+			binding.chat.chatType !== "dm" &&
+			!config.groups.some((group) => group.chat === binding.chat.chatId)
+		) {
+			deps.log.warn(
+				`settled: group config absent for binding "${hashId(key)}" — skipped, binding kept`,
+			);
+			deps.log.debug(
+				`settled: group config absent for binding "${key}" — skipped, binding kept`,
+			);
+			continue;
+		}
 		const user = await bindingUser(deps, config, key, binding.chat);
 		if (user === undefined || meta === undefined) {
 			await unbindAndLog(deps, conversationId, key, "user unresolvable");
@@ -370,6 +392,9 @@ async function unbindAndLog(
 ): Promise<void> {
 	await deps.bindings.unbind(key);
 	deps.log.info(
+		`settled: unbound "${hashId(key)}" from conversation ${String(conversationId)} (${reason})`,
+	);
+	deps.log.debug(
 		`settled: unbound "${key}" from conversation ${String(conversationId)} (${reason})`,
 	);
 }

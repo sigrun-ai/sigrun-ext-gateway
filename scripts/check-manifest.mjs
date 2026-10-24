@@ -71,6 +71,7 @@ const HOST_MODULE_PINS = {
 	"@earendil-works/chord": "1.3.0",
 	"@earendil-works/pi-codemode": "1.3.0",
 	typebox: "1.3.27",
+	"@sigrun/shared": "0.1.2",
 };
 const peers = manifest.peerDependencies ?? {};
 const devDeps = manifest.devDependencies ?? {};
@@ -82,8 +83,8 @@ for (const [module, spec] of Object.entries(peers)) {
 	const pin = HOST_MODULE_PINS[module];
 	check(spec === pin, `package.json: peerDependencies["${module}"] must be exact "${pin}" (got ${JSON.stringify(spec)})`);
 	check(
-		devDeps[module] === pin,
-		`package.json: devDependencies["${module}"] must mirror the peer pin at exact "${pin}" (got ${JSON.stringify(devDeps[module])})`,
+		devDeps[module] === pin || (module === "@sigrun/shared" && devDeps[module] === "file:../sigrun/shared"),
+		`package.json: devDependencies["${module}"] must mirror the peer pin at exact "${pin}" (the shared workspace keeps its file: dev shape; got ${JSON.stringify(devDeps[module])})`,
 	);
 }
 

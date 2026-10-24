@@ -86,6 +86,8 @@ export interface EngineDeps {
 	readonly failedRecently?: () => number;
 	/** Test/task-internal ledger seam for shutdown and recovery tests. */
 	readonly deliveryLedger?: Ledger;
+	/** Construction-count test seam; production uses the real pipeline. */
+	readonly pipelineFactory?: typeof createPipeline;
 	/** Test seam for the receipt wait; production keeps the pinned 30 s. */
 	readonly toolReceiptWaitMs?: number;
 }
@@ -235,11 +237,10 @@ export function createEngine(
 		import("@earendil-works/pi-durable").SubmissionId,
 		import("./inbound/pipeline.js").SubmissionOrigin
 	>();
-	// Every constructed channel pipeline's flush handle: stopIntake
-	// flushes the open album windows through these (one per supervised
-	// channel — the pipelines share state files but each owns its
-	// channel's in-flight albums).
-	const pipelines: import("./inbound/pipeline.js").PipelineHandle[] = [];
+	// ONE pipeline per supervised channel, built at start and reused by
+	// every supervision retry. Retrying an adapter must not accumulate
+	// duplicate SeenSets or open-album collectors for the process lifetime.
+	const pipelines = new Map<string, import("./inbound/pipeline.js").PipelineHandle>();
 	let started = false;
 	let intakeStopped = false;
 	// Per-channel abort ownership lets stop() signal adapters even when an
@@ -276,48 +277,15 @@ export function createEngine(
 		id: string,
 	): ChannelContext => {
 		const channelLog = ctxLog(`channel:${id}`);
-		// ONE pipeline per engine (the state stores are shared; the
-		// binding key carries the channel): every channel's receive runs
-		// through it with ITS channel id and adapter. The pipeline's
-		// origins map is the engine's outbound seam (Task 5 reads it).
-		const channelEntry = channels.find(
-			(entry) => entry.channel.id === id,
-		);
-		if (channelEntry === undefined) {
-			// makeContext runs only inside a start attempt over a recorded
-			// channel; reaching here means the supervisor wiring diverged.
+		// The channel's ONE pipeline was built at engine start. A retry
+		// closes over the same receive/flush handles, preserving its seen
+		// set and any open album window instead of allocating replacements.
+		const receivePipeline = pipelines.get(id);
+		if (receivePipeline === undefined) {
 			throw new Error(
-				`gateway: channel "${id}" context built without its contribution`,
+				`gateway: channel "${id}" context built without its pipeline`,
 			);
 		}
-		const receivePipeline = createPipeline({
-			host,
-			channel: channelEntry.channel,
-			stateDir: gatewayDir,
-			log: channelLog,
-			origins,
-			access,
-			// The ONE engine-wide binding store — the fan-out and the delivery
-			// workers share this exact instance (see its declaration).
-			bindings,
-			streams,
-			channelOf,
-			stages: {
-				attachments: async (event) => {
-					const binding = bindings.get(bindingKey(id, event.chat));
-					if (binding === undefined) return { parts: [], notes: [] };
-					const config = await readConfig(host);
-					return await collectAttachments(
-						{ host, log: channelLog },
-						binding.conversationId,
-						event.attachments ?? [],
-						config.media.maxBytes,
-						_signal,
-					);
-				},
-			},
-		});
-		pipelines.push(receivePipeline);
 		return {
 			signal: _signal,
 			// The §8.4 pipeline: the config block is read LIVE per event
@@ -584,6 +552,38 @@ export function createEngine(
 					log.info(`channel "${id}" disabled via settings`);
 					continue;
 				}
+				const channelLog = ctxLog(`channel:${id}`);
+				// One lifetime signal per channel: the long-lived pipeline's
+				// attachment fetches abort with the channel, not one retry.
+				const abort = new AbortController();
+				const receivePipeline = (deps.pipelineFactory ?? createPipeline)({
+					host,
+					channel: entry.channel,
+					stateDir: gatewayDir,
+					log: channelLog,
+					origins,
+					access,
+					// The ONE engine-wide binding store — the fan-out and the
+					// delivery workers share this exact instance.
+					bindings,
+					streams,
+					channelOf,
+					stages: {
+						attachments: async (event) => {
+							const binding = bindings.get(bindingKey(id, event.chat));
+							if (binding === undefined) return { parts: [], notes: [] };
+							const liveConfig = await readConfig(host);
+							return await collectAttachments(
+								{ host, log: channelLog },
+								binding.conversationId,
+								event.attachments ?? [],
+								liveConfig.media.maxBytes,
+								abort.signal,
+							);
+						},
+					},
+				});
+				pipelines.set(id, receivePipeline);
 				const supervisor = new Supervisor(entry, {
 					makeContext: (signal: AbortSignal, report) =>
 						makeContext(signal, report, () => {
@@ -614,6 +614,10 @@ export function createEngine(
 					setTimer: timers.setTimer,
 					now: timers.now,
 					log: createLog(`channel:${id}`),
+					counts: {
+						delivered: () => supervisor.countDelivered(),
+						failed: () => supervisor.countFailed(),
+					},
 					resolveFiles: (entry) => ledger.resolveFiles(host, entry),
 				});
 				workers.set(id, worker);
@@ -621,7 +625,6 @@ export function createEngine(
 				// or backoff — a failing adapter never wedges boot). The engine
 				// owns a per-channel signal so stop() aborts adapters directly;
 				// the host's start signal is bridged for the normal core order.
-				const abort = new AbortController();
 				channelAborters.set(id, abort);
 				if (ctx.signal.aborted) abort.abort();
 				else ctx.signal.addEventListener("abort", () => abort.abort(), { once: true });
@@ -665,8 +668,8 @@ export function createEngine(
 			// platform's redelivery would dedupe to a no-op and the album
 			// would be lost). One failed album's flush is logged and never
 			// strands the others (flushAlbums drains every group).
-			const pending = [...pipelines];
-			pipelines.length = 0;
+			const pending = [...pipelines.values()];
+			pipelines.clear();
 			await Promise.all(pending.map((pipeline) => pipeline.flushAlbums()));
 			// Close only after the album flush: those events already committed
 			// their dedupe ids and must be admitted before new intake is refused.

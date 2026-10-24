@@ -58,7 +58,9 @@ A channel block supports:
 Group rows have `chat` (platform chat id) and `owner` (sigrun user)
 required, plus:
 
-- `mention`: `"required"` (default) or `"always"`.
+- `mention`: `"required"` (default) admits only messages that mention
+  or reply to the bot; `"always"` admits every otherwise-eligible
+  message without a mention.
 - `members`: `"linked"` (default) or `"anyone"`. The open `"anyone"`
   mode requires a non-empty `tools` array; `extensions` optionally pins
   the extension selection as well. Unknown senders still cannot use
@@ -66,8 +68,10 @@ required, plus:
 - `tools` and `extensions`: optional arrays for the group's fixed agent
   selection. The gateway prompt is included in open-group selections.
 
-Malformed channel or group blocks fail only that channel or group and
-are visible in status; they do not disable siblings.
+A malformed channel block appears as `failed` in the status surface.
+A malformed group block drops only that group's messages and logs the
+reason; group failures do not appear in channel status. Neither disables
+siblings.
 
 Example (synthetic ids):
 
@@ -172,6 +176,11 @@ finishes the last run-settle window, delivery workers drain for up to
 are released. Undelivered `pending` or `attempting` entries remain in
 the ledger for restart recovery; attempting entries are marked as
 recovered before resend.
+
+Restarting mid-operation is safe for durable delivery, with one explicit
+exception: SIGKILL inside the 1.5-second album window loses the merged
+submission by design. Its events were already deduplicated, so platform
+redelivery is a no-op; graceful shutdown flushes the album instead.
 
 ## Development
 

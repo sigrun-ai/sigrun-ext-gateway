@@ -275,7 +275,10 @@ export function createPipeline(deps) {
         const batch = albums.add(key, event, envelopeText);
         if (batch === undefined) {
             // Collecting: commit seen NOW (the events ARE admitted — a
-            // platform redelivery of a held sibling is a no-op) and arm
+            // platform redelivery of a held sibling is a no-op). A SIGKILL
+            // before the window closes loses this submission by design;
+            // graceful stopIntake flushes it, and redelivery dedupes safely.
+            // Arm
             // the close timer that submits the merged batch.
             await seen.commit(`${key}:${event.messageId}`, now());
             scheduleAlbumClose(channelId, key, event, user, conversationId, config);

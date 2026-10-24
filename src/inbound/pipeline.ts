@@ -162,8 +162,8 @@ export type Receive = (
 
 /**
  * A pipeline's receive, carrying the engine-owned flush handle and the
- * tap handler: ONE pipeline per engine (the state stores are shared
- * across channels; the binding key carries the channel) — the engine
+ * tap handler: ONE pipeline per supervised channel (the binding key
+ * carries the channel) — the engine
  * wires every supervised channel's `ChannelContext.receive` through
  * the callable, calls `flushAlbums` from its `stopIntake`, and routes
  * `ChannelContext.action` through `action`.
@@ -486,7 +486,10 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 		const batch = albums.add(key, event, envelopeText);
 		if (batch === undefined) {
 			// Collecting: commit seen NOW (the events ARE admitted — a
-			// platform redelivery of a held sibling is a no-op) and arm
+			// platform redelivery of a held sibling is a no-op). A SIGKILL
+			// before the window closes loses this submission by design;
+			// graceful stopIntake flushes it, and redelivery dedupes safely.
+			// Arm
 			// the close timer that submits the merged batch.
 			await seen.commit(`${key}:${event.messageId}`, now());
 			scheduleAlbumClose(

@@ -176,7 +176,7 @@ describe("send_message", () => {
 		const result = await call("send_message", { to: "loop", text: "hello" });
 		expect(result.isError).toBe(true);
 		expect(output(result)).toContain("no linked chats");
-		expect(bindings.allKeys()).toEqual([]);
+		expect(bindings.entries()).toEqual({});
 		expect(host.identity.actingUser).toBeDefined();
 		expect(ledger.list()).toEqual([]);
 	});

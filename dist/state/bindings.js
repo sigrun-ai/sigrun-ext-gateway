@@ -53,10 +53,6 @@ export class BindingStore {
             toBinding(row),
         ]));
     }
-    /** Every live binding key (target authorization and chat enumeration). */
-    allKeys() {
-        return Object.keys(this.file.readSync().bindings);
-    }
     /** Every live key bound to `conversationId` (the delivery fan-out read). */
     keysOf(conversationId) {
         const keys = [];

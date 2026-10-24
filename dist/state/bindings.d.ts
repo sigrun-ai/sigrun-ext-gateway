@@ -42,8 +42,6 @@ export declare class BindingStore {
     get(key: string): Binding | undefined;
     /** One file read's binding rows, keyed for target authorization. */
     entries(): Readonly<Record<string, Binding>>;
-    /** Every live binding key (target authorization and chat enumeration). */
-    allKeys(): readonly string[];
     /** Every live key bound to `conversationId` (the delivery fan-out read). */
     keysOf(conversationId: number): readonly string[];
     /** Bind `key` to `conversationId`, recording any prior binding in `previous`. */

@@ -293,6 +293,47 @@ describe("onRunSettled: access re-check (M7)", () => {
 		expect(warnings.some((line) => line.includes("binding kept"))).toBe(true);
 	});
 
+	test("a removed group config skips delivery and retains the binding", async () => {
+		const harness = await rig();
+		const conversationId = (await harness.host.conversations.create({
+			owner: "alice",
+		})) as number;
+		const chat: ChatRef = { chatId: "-100000000002", chatType: "group" };
+		const key = bindingKey("loop", chat);
+		await harness.bindings.bind(key, conversationId, chat);
+		const warnings: string[] = [];
+		const deps: SettledDeps = {
+			...harness.deps,
+			configOf: async () => parseGatewayConfig({
+				channels: { loop: { groups: [] } },
+			}).channels.loop as ChannelConfig,
+			log: { ...silentLog(), warn: (message) => warnings.push(message) },
+		};
+		await onRunSettled(answeredEvent(conversationId, "kept"), deps);
+		expect(harness.bindings.get(key)).toBeDefined();
+		expect(harness.ledger.nextPending("loop")).toBeUndefined();
+		expect(warnings.some((line) => line.includes("group config absent") && line.includes("binding kept"))).toBe(true);
+	});
+
+	test("an unresolvable user with a channel config still unbinds", async () => {
+		const harness = await rig();
+		const conversationId = (await harness.host.conversations.create({
+			owner: "alice",
+		})) as number;
+		await harness.bindings.bind(KEY, conversationId, CHAT);
+		await harness.identities.unlinkUser("alice");
+		const deps: SettledDeps = {
+			...harness.deps,
+			// The channel config exists but has no mapping for the DM.
+			configOf: async () => parseGatewayConfig({
+				channels: { loop: { dm: "allowlist", allow: [] } },
+			}).channels.loop as ChannelConfig,
+		};
+		await onRunSettled(answeredEvent(conversationId, "removed"), deps);
+		expect(harness.bindings.get(KEY)).toBeUndefined();
+		expect(harness.ledger.nextPending("loop")).toBeUndefined();
+	});
+
 	test("an owner's own conversation still delivers", async () => {
 		const harness = await rig();
 		await harness.bindings.bind(KEY, 7, CHAT);

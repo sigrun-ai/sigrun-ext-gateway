@@ -26,7 +26,7 @@ import type { SubmissionId } from "@earendil-works/pi-durable";
 import type { ChannelConfig } from "../config.js";
 import type { BindingStore } from "../state/bindings.js";
 import type { Ledger } from "../state/ledger.js";
-import type { EngineLog } from "../log.js";
+import { type EngineLog } from "../log.js";
 import type { IdentityStore } from "../state/identities.js";
 import type { SubmissionOrigin } from "../inbound/pipeline.js";
 /** The pinned notice for a textless answer (Review Focus 4). */

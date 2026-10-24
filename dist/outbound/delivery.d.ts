@@ -23,7 +23,7 @@
 import type { ChannelContribution, OutboundMessage } from "@sigrun/sigrun/extension";
 import type { Ledger, LedgerEntry } from "../state/ledger.js";
 import type { BindingStore } from "../state/bindings.js";
-import type { EngineLog } from "../log.js";
+import { type EngineLog } from "../log.js";
 /** The worker's injectable dependencies. */
 export interface DeliveryDeps {
     readonly bindings: BindingStore;
@@ -38,6 +38,11 @@ export interface DeliveryDeps {
     readonly now?: () => number;
     /** Re-read file bytes at send time; ledger entries persist paths only. */
     readonly resolveFiles?: (entry: LedgerEntry) => Promise<OutboundMessage["files"]>;
+    /** Terminal delivery outcomes for the channel's status counters. */
+    readonly counts?: {
+        delivered(): void;
+        failed(): void;
+    };
 }
 /** The pinned resend marker for recovered entries. */
 export declare const RESENT_MARKER = "(resent after restart)";

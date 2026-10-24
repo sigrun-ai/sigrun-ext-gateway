@@ -20,6 +20,7 @@
  * timer armed by drain settles after stop() — the entry stays pending
  * and the next boot's recovery resends it).
  */
+import { hashId } from "../log.js";
 /** The pinned resend marker for recovered entries. */
 export const RESENT_MARKER = "(resent after restart)";
 /**
@@ -162,6 +163,7 @@ export class DeliveryWorker {
             await this.ledger.mark(entry.id, "attempting");
             const receipt = await this.boundedSend(message);
             await this.ledger.mark(entry.id, "delivered", receipt.messageIds);
+            this.deps.counts?.delivered();
             return true;
         }
         catch (error) {
@@ -226,19 +228,24 @@ export class DeliveryWorker {
                     await this.deps.bindings.markDead(entry.bindingKey);
                 }
                 catch (markError) {
-                    this.deps.log.error(`delivery: markDead failed for "${entry.bindingKey}"`, markError);
+                    this.deps.log.error(`delivery: markDead failed for binding "${hashId(entry.bindingKey)}"`, markError);
+                    this.deps.log.debug(`delivery: markDead failed for binding "${entry.bindingKey}"`);
                 }
             }
-            this.deps.log.warn(`delivery: chat gone for "${entry.channel}:${entry.chat.chatId}" — binding marked dead`);
+            this.deps.log.warn(`delivery: chat gone for "${entry.channel}:${hashId(entry.chat.chatId)}" — binding marked dead`);
+            this.deps.log.debug(`delivery: chat gone for "${entry.channel}:${entry.chat.chatId}" — binding marked dead`);
             await this.markLedger(entry.id, "failed");
+            this.deps.counts?.failed();
             return true;
         }
         if (kind === "permanent") {
             const fileDetail = error instanceof Error && error.name === FILE_RESOLUTION_ERROR
                 ? ` (${error.message})`
                 : "";
-            this.deps.log.error(`delivery: permanent failure ("${entry.kind}" to "${entry.chat.chatId}")${fileDetail}`, error);
+            this.deps.log.error(`delivery: permanent failure ("${entry.kind}" to "${hashId(entry.chat.chatId)}")${fileDetail}`, error);
+            this.deps.log.debug(`delivery: permanent failure ("${entry.kind}" to "${entry.chat.chatId}")${fileDetail}`);
             await this.markLedger(entry.id, "failed");
+            this.deps.counts?.failed();
             return true;
         }
         // Transient: the retry ladder. attempts was already incremented by
@@ -246,8 +253,10 @@ export class DeliveryWorker {
         // total (the initial attempt plus one per delay).
         const retriesUsed = entry.attempts;
         if (retriesUsed >= this.deps.delays.length) {
-            this.deps.log.error(`delivery: retries exhausted ("${entry.kind}" to "${entry.chat.chatId}"): ${detail}`);
+            this.deps.log.error(`delivery: retries exhausted ("${entry.kind}" to "${hashId(entry.chat.chatId)}"): ${detail}`);
+            this.deps.log.debug(`delivery: retries exhausted ("${entry.kind}" to "${entry.chat.chatId}"): ${detail}`);
             await this.markLedger(entry.id, "failed");
+            this.deps.counts?.failed();
             return true;
         }
         const delay = this.deps.delays[retriesUsed] ?? 0;

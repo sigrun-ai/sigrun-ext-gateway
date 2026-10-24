@@ -21,6 +21,7 @@
  *   `deps.origins`): the pinned "Stopped." for an abort reason, a
  *   short reason notice otherwise.
  */
+import { hashId } from "../log.js";
 import { renderChunks } from "./render.js";
 import { resolveTargets } from "../jobs.js";
 /** The pinned notice for a textless answer (Review Focus 4). */
@@ -88,12 +89,14 @@ async function fanOutAnswer(event, deps, conversationId) {
         // never silently delete chats) and the fan-out skips with a log.
         const channel = channelOfFor(deps, key);
         if (channel === undefined) {
-            deps.log.warn(`settled: no channel adapter for binding "${key}" — skipped, binding kept`);
+            deps.log.warn(`settled: no channel adapter for binding "${hashId(key)}" — skipped, binding kept`);
+            deps.log.debug(`settled: no channel adapter for binding "${key}" — skipped, binding kept`);
             continue;
         }
         const config = await deps.configOf(key.split(":")[0] ?? "");
         if (config === undefined) {
-            deps.log.warn(`settled: channel config unavailable for binding "${key}" — skipped, binding kept`);
+            deps.log.warn(`settled: channel config unavailable for binding "${hashId(key)}" — skipped, binding kept`);
+            deps.log.debug(`settled: channel config unavailable for binding "${key}" — skipped, binding kept`);
             continue;
         }
         // M7: the access re-check. DM bindings resolve their user through
@@ -101,6 +104,16 @@ async function fanOutAnswer(event, deps, conversationId) {
         // bindings use the config's owner. A FAILED CHECK (a present config
         // whose user is unresolvable, or access "none") unbinds, logs, skips.
         const meta = await deps.host.conversations.meta(conversationId);
+        // A removed group row pauses that group; it does not revoke the
+        // binding. This matches inbound admission and preserves continuity
+        // if the operator restores the row. A malformed row still reaches
+        // the genuine unresolvable-user path below.
+        if (binding.chat.chatType !== "dm" &&
+            !config.groups.some((group) => group.chat === binding.chat.chatId)) {
+            deps.log.warn(`settled: group config absent for binding "${hashId(key)}" — skipped, binding kept`);
+            deps.log.debug(`settled: group config absent for binding "${key}" — skipped, binding kept`);
+            continue;
+        }
         const user = await bindingUser(deps, config, key, binding.chat);
         if (user === undefined || meta === undefined) {
             await unbindAndLog(deps, conversationId, key, "user unresolvable");
@@ -243,7 +256,8 @@ function channelOfFor(deps, key) {
 /** Unbind + log (the M7 revoked-access path). */
 async function unbindAndLog(deps, conversationId, key, reason) {
     await deps.bindings.unbind(key);
-    deps.log.info(`settled: unbound "${key}" from conversation ${String(conversationId)} (${reason})`);
+    deps.log.info(`settled: unbound "${hashId(key)}" from conversation ${String(conversationId)} (${reason})`);
+    deps.log.debug(`settled: unbound "${key}" from conversation ${String(conversationId)} (${reason})`);
 }
 /** The answer's visible text (text blocks joined). */
 function answerText(event) {

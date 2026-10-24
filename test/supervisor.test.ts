@@ -26,6 +26,7 @@ import type {
 import { createFakeHost, type FakeHost } from "./fake-host.js";
 import { createEngine, type EngineInternals } from "../src/engine.js";
 import type { GatewayEngine } from "@sigrun/sigrun/extension";
+import { createPipeline } from "../src/inbound/pipeline.js";
 
 // ---------------------------------------------------------------------------
 // Fake clock/timer/random
@@ -255,6 +256,88 @@ describe("supervision (createEngine + fake timers)", () => {
 		ctx.fail(new Error("synthetic post-connect failure"));
 		expect(engine.status().channels.loop?.state).toBe("backoff");
 		expect(time.scheduled.map((entry) => entry.ms)).toEqual([1000]);
+		await engine.stop();
+	});
+
+	test("a fail-restart cycle reuses the channel's one pipeline", async () => {
+		const host = await fakeHost();
+		const adapter = fakeAdapter("loop");
+		const time = new FakeTime();
+		let constructions = 0;
+		const engine = createEngine(host, {
+			timers: fakeTimers(time),
+			pipelineFactory: (pipelineDeps) => {
+				constructions++;
+				return createPipeline(pipelineDeps);
+			},
+		});
+		await engine.start(engineCtx([
+			{ extension: "fixture", channel: adapter },
+		]));
+		adapter.lastContext()?.fail(new Error("synthetic restart"));
+		await time.advance(1000);
+		expect(adapter.contexts).toHaveLength(2);
+		expect(constructions).toBe(1);
+		await engine.stop();
+	});
+
+	test("delivery and terminal-failure outcomes update status counts", async () => {
+		const host = await fakeHost();
+		const adapter = fakeAdapter("loop");
+		const time = new FakeTime();
+		const engine = createEngine(host, { timers: fakeTimers(time) });
+		await engine.start(engineCtx([
+			{ extension: "fixture", channel: adapter },
+		]));
+		const internals = engine as GatewayEngine & EngineInternals;
+		const toolDeps = internals.toolDeps();
+		const chat = { chatId: "100000001", chatType: "dm" } as const;
+		await toolDeps.bindings.bind("loop:default:dm:100000001", 7, chat);
+		await toolDeps.ledger.enqueue({
+			channel: "loop",
+			bindingKey: "loop:default:dm:100000001",
+			chat,
+			kind: "final",
+			message: { chat, text: "delivered" },
+		});
+		await toolDeps.ledger.enqueue({
+			channel: "loop",
+			bindingKey: "loop:default:dm:100000001",
+			chat,
+			kind: "final",
+			message: { chat, text: "failed" },
+		});
+		adapter.send = async (message) => {
+			if (message.text === "failed") {
+				const error = new Error("synthetic permanent failure");
+				(error as Error & { kind: string }).kind = "permanent";
+				throw error;
+			}
+			return { messageIds: ["synthetic-receipt"] };
+		};
+		adapter.classifyError = (error) =>
+			(error as { kind?: string }).kind === "permanent" ? "permanent" : "transient";
+		// Enqueue-after-start does not implicitly kick every worker;
+		// settled/tool paths own that poke. This test drives the same seam.
+		await internals.settle(
+			{
+				conversationId: 99 as import("@earendil-works/pi-durable").ConversationId,
+				inputs: [],
+				inputTexts: [],
+				outcome: { status: "unanswered", reason: "test kick" },
+			},
+			{} as import("@sigrun/sigrun/extension").MemoryEventApi,
+			{} as import("@sigrun/sigrun/extension").HandlerContext,
+		);
+		for (let attempt = 0; attempt < 20; attempt++) {
+			const counts = engine.status().channels.loop?.counts;
+			if (counts?.delivered === 1 && counts.failed === 1) break;
+			await new Promise((resolve) => setTimeout(resolve, 5));
+		}
+		expect(engine.status().channels.loop?.counts).toMatchObject({
+			delivered: 1,
+			failed: 1,
+		});
 		await engine.stop();
 	});
 
