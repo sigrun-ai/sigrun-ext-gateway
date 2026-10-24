@@ -57,6 +57,7 @@ export class Ledger {
             state: "pending",
             attempts: 0,
             createdAt: this.now(),
+            stateSince: this.now(),
         };
         const state = await this.file.update((draft) => {
             if (entry.tag !== undefined &&
@@ -91,6 +92,9 @@ export class Ledger {
                 // An attempt transition counts the attempt; delivered/failed
                 // keep the count the attempts produced.
                 attempts: state === "attempting" ? row.attempts + 1 : row.attempts,
+                // The state transition stamps its own clock (the failure
+                // window reads it — an old entry failing NOW is fresh).
+                stateSince: this.now(),
                 ...(receipt === undefined ? {} : { receipt: [...receipt] }),
             };
             draft.entries[index] = next;
@@ -117,9 +121,12 @@ export class Ledger {
         }
         this.entries = recovered.entries;
     }
-    /** How many entries are `failed` with `createdAt >= ts` (health's window). */
+    /** How many entries are `failed` having FAILED within the window —
+     *  the state transition's clock, not creation: an old entry failing
+     *  NOW still degrades health. */
     failedSince(ts) {
-        return this.entries.filter((entry) => entry.state === "failed" && entry.createdAt >= ts).length;
+        return this.entries.filter((entry) => entry.state === "failed" &&
+            (entry.stateSince ?? entry.createdAt) >= ts).length;
     }
     /**
      * Prune DELIVERED entries older than `PRUNE_AFTER_MS` (7 days). Failed

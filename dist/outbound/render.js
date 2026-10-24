@@ -52,11 +52,14 @@ function formatChunk(chunk, caps, format) {
             return format === undefined ? chunk : format(chunk);
     }
 }
-/** Hard-split one formatted string at exact `limit` boundaries. */
+/** Hard-split one formatted string at exact `limit` boundaries. A
+ *  non-positive limit (a misconfigured adapter) degrades to length-1
+ *  pieces — never an infinite loop of empty slices. */
 function hardSplit(text, limit) {
+    const step = Math.max(1, limit);
     const pieces = [];
-    for (let start = 0; start < text.length; start += limit) {
-        pieces.push(text.slice(start, start + limit));
+    for (let start = 0; start < text.length; start += step) {
+        pieces.push(text.slice(start, start + step));
     }
     return pieces;
 }

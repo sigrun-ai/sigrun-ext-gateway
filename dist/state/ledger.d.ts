@@ -59,6 +59,11 @@ export interface LedgerEntry {
     readonly state: LedgerState;
     readonly attempts: number;
     readonly createdAt: number;
+    /** When the entry entered its CURRENT state (clock ms) — the failure
+     *  window reads THIS, never `createdAt`: an old entry failing NOW is
+     *  a fresh health signal, not yesterday's. Absent on entries written
+     *  before the field existed (created-at is the fallback). */
+    readonly stateSince?: number;
     /** Platform message ids of the delivered send. */
     readonly receipt?: string[];
     readonly tag?: string;
@@ -124,7 +129,9 @@ export declare class Ledger {
      * `pending` and terminal entries are untouched.
      */
     recoverAfterRestart(): Promise<void>;
-    /** How many entries are `failed` with `createdAt >= ts` (health's window). */
+    /** How many entries are `failed` having FAILED within the window —
+     *  the state transition's clock, not creation: an old entry failing
+     *  NOW still degrades health. */
     failedSince(ts: number): number;
     /**
      * Prune DELIVERED entries older than `PRUNE_AFTER_MS` (7 days). Failed

@@ -38,6 +38,7 @@ import type {
 	SubmissionRecordWire,
 	UserWire as DirectoryUserWire,
 } from "@sigrun/shared/views";
+import type { AccountLinkWire } from "@sigrun/sigrun/extension";
 import type {
 	HandlerContext,
 	SigrunHost,
@@ -144,6 +145,8 @@ export async function createFakeHost(
 	>();
 	const watchList: Watcher[] = [];
 	const interactions = new Map<string, InteractionRecord>();
+	// External account links, keyed `provider:subject` (M3a's surface).
+	const accountLinks = new Map<string, AccountLinkWire>();
 	const filesByConversation = new Map<
 		ConversationId,
 		Map<string, { bytes: Uint8Array; mime?: string }>
@@ -463,6 +466,52 @@ export async function createFakeHost(
 			actingUser: async (id: ConversationId) => {
 				record("identity.actingUser", id);
 				return conversationOwners.get(id);
+			},
+		},
+
+		// External account links (multi-user M3a): the in-memory table the
+		// 0.1.6 contract requires. The engine does not use it yet (the
+		// identity store owns chat links); the surface is here so the host
+		// shape is whole for the tests that boot it.
+		accounts: {
+			lookup: async (provider: string, subject: string) => {
+				record("accounts.lookup", provider, subject);
+				return accountLinks.get(`${provider}:${subject}`);
+			},
+			link: async (
+				provider: string,
+				subject: string,
+				user: string,
+				via: "login" | "self" | "pairing" | "admin",
+			) => {
+				record("accounts.link", provider, subject, user, via);
+				const key = `${provider}:${subject}`;
+				const existing = accountLinks.get(key);
+				if (existing !== undefined) {
+					if (existing.user === user) return existing;
+					throw new Error(
+						`account_link_conflict: ${provider}/${subject} is already linked`,
+				);
+				}
+				const row: AccountLinkWire = {
+					provider,
+				subject,
+					user,
+					linkedAt: 0,
+					via,
+				};
+				accountLinks.set(key, row);
+				return row;
+			},
+			unlink: async (provider: string, subject: string) => {
+				record("accounts.unlink", provider, subject);
+				return accountLinks.delete(`${provider}:${subject}`);
+			},
+			listForUser: async (user: string) => {
+				record("accounts.listForUser", user);
+				return [...accountLinks.values()].filter(
+						(row) => row.user === user,
+				);
 			},
 		},
 

@@ -39,37 +39,54 @@ export class DeliveryWorker {
     inFlight;
     /** The cancel for the armed retry timer. */
     cancelRetry;
-    /** Deadline ms for the current drain (0 = no drain running). */
-    drainDeadline = 0;
     constructor(channel, ledger, deps) {
         this.channel = channel;
         this.ledger = ledger;
         this.deps = deps;
         this.now = deps.now ?? Date.now;
     }
-    /** Start the loop if idle (the enqueue-side poke). */
+    /** Start the loop if idle (the enqueue-side poke). A no-op while a
+     *  drain owns the queue (the drain IS the loop until it resolves). */
     kick() {
         if (this.stopped || this.busy)
             return;
         const loop = this.runLoop();
-        this.inFlight = loop.catch(() => { });
+        this.inFlight = loop.catch((error) => {
+            // A loop failure is engine-side (the ledger or the adapter
+            // wrapper): logged loud, never silent — the channel's queue
+            // stays honest (the next kick retries).
+            this.deps.log.error(`delivery: loop failed (channel "${this.channel.id}")`, error);
+        });
         void loop;
     }
     /**
      * Send until the ledger's channel queue is empty or `deadlineMs`
-     * (absolute clock ms) passes. Retries already scheduled fire on
-     * their own timers — drain does not wait them out.
+     * (absolute clock ms) passes. The drain TAKES OWNERSHIP of the
+     * queue: `busy` is set for its duration (a kick during a drain is a
+     * no-op), the armed retry timer is CANCELLED (the drain pulls the
+     * re-pended entry directly — no timer-driven second loop races
+     * it), and any in-flight loop is joined first. Retries are NOT
+     * waited out: a retry-armed entry parks the drain (the entry stays
+     * pending; the next boot's recovery resends it).
      */
     async drain(deadlineMs) {
         if (this.stopped)
             return;
-        this.drainDeadline = deadlineMs;
-        try {
-            // Join any in-flight loop, then pull entries directly until the
-            // queue empties or the deadline passes. A retry-armed entry parks
-            // the pull (the retry timer's kick owns the restart — a drain
-            // never waits out a backoff).
+        // Cancel the pending retry: the drain owns the queue now.
+        this.cancelRetry?.();
+        this.cancelRetry = undefined;
+        // Join any in-flight loop before taking the busy flag.
+        await this.inFlight;
+        if (this.stopped)
+            return;
+        if (this.busy) {
+            // A concurrent drain (the engine's stop is idempotent, but a
+            // caller may race): join it rather than run a second loop.
             await this.inFlight;
+            return;
+        }
+        this.busy = true;
+        try {
             for (;;) {
                 if (this.stopped)
                     return;
@@ -84,8 +101,7 @@ export class DeliveryWorker {
             }
         }
         finally {
-            if (this.drainDeadline === deadlineMs)
-                this.drainDeadline = 0;
+            this.busy = false;
         }
     }
     /** Cancel the retry timer and join the in-flight send. Idempotent. */
@@ -135,9 +151,13 @@ export class DeliveryWorker {
      * Never throws.
      */
     async sendOne(entry) {
-        await this.ledger.mark(entry.id, "attempting");
         const message = this.buildMessage(entry);
         try {
+            // The attempting mark rides the same isolation as the rest: a
+            // failing ledger write is LOGGED and the send does not run (an
+            // unmarked entry must not be sent — the crash window would
+            // duplicate it on recovery).
+            await this.ledger.mark(entry.id, "attempting");
             const receipt = await this.boundedSend(message);
             await this.ledger.mark(entry.id, "delivered", receipt.messageIds);
             return true;
@@ -193,6 +213,11 @@ export class DeliveryWorker {
     async onSendError(entry, error) {
         const kind = this.classify(error);
         const detail = error instanceof Error ? error.message : String(error);
+        // A ledger-mark failure arrives here too (sendOne's try wraps the
+        // attempting mark): it is NOT a send failure — a transient retry of
+        // an unmarked entry would double-send after recovery. Mark errors
+        // log loud and park the entry as-is (the next boot's recovery owns
+        // the resend).
         if (kind === "chat_gone") {
             if (entry.bindingKey !== undefined) {
                 try {

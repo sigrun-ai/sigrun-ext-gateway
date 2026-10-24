@@ -60,16 +60,34 @@ async function fanOutAnswer(event, deps, conversationId) {
     // The answer's visible text: text blocks joined (thinking/tool calls
     // are never shown — §8.6).
     const text = answerText(event);
+    // The origin-chat streaming hand-off (Task 6's seam), consulted ONCE
+    // per conversation (before the fan-out): when the stream owned
+    // delivery, no finals enqueue for the STREAMED chat — the rest of the
+    // fan-out still runs (the seam owns one chat, never the whole set).
+    const streamed = await deps.streams.finalize(conversationId, []);
     for (const key of keys) {
         const binding = deps.bindings.get(key);
         if (binding === undefined || binding.dead === true)
             continue;
+        // A channel config that is ABSENT or {failed} is a CONFIG problem,
+        // not a revoked binding: the binding is KEPT (a config typo must
+        // never silently delete chats) and the fan-out skips with a log.
+        const channel = channelOfFor(deps, key);
+        if (channel === undefined) {
+            deps.log.warn(`settled: no channel adapter for binding "${key}" — skipped, binding kept`);
+            continue;
+        }
+        const config = await deps.configOf(key.split(":")[0] ?? "");
+        if (config === undefined) {
+            deps.log.warn(`settled: channel config unavailable for binding "${key}" — skipped, binding kept`);
+            continue;
+        }
         // M7: the access re-check. DM bindings resolve their user through
-        // the LINK (the channel's allowlist mapped the sender at admission;
-        // the binding outlives that mapping); group bindings use the
-        // config's owner. A failed check unbinds, logs, skips.
+        // the SAME allowlist-then-link resolution admission ran; group
+        // bindings use the config's owner. A FAILED CHECK (a present config
+        // whose user is unresolvable, or access "none") unbinds, logs, skips.
         const meta = await deps.host.conversations.meta(conversationId);
-        const user = await bindingUser(deps, key, binding.chat);
+        const user = await bindingUser(deps, config, key, binding.chat);
         if (user === undefined || meta === undefined) {
             await unbindAndLog(deps, conversationId, key, "user unresolvable");
             continue;
@@ -79,17 +97,12 @@ async function fanOutAnswer(event, deps, conversationId) {
             await unbindAndLog(deps, conversationId, key, `access revoked for user "${user}"`);
             continue;
         }
-        const channel = channelOfFor(deps, key);
-        if (channel === undefined) {
-            deps.log.warn(`settled: no channel for binding "${key}" — skipped`);
+        const chunks = text === "" ? [NO_TEXT_REPLY] : renderChunks(text, channel.capabilities, channel.format);
+        // The stream owns the ORIGIN chat (the chat the run streamed to):
+        // that key is skipped; every other key still enqueues.
+        if (streamed && key === originKeyOf(deps, event)?.bindingKey) {
             continue;
         }
-        const chunks = text === "" ? [NO_TEXT_REPLY] : renderChunks(text, channel.capabilities, channel.format);
-        // The origin-chat streaming hand-off (Task 6's seam): when the
-        // stream owns delivery, no finals enqueue.
-        const owned = await deps.streams.finalize(conversationId, chunks);
-        if (owned)
-            return;
         for (let index = 0; index < chunks.length; index++) {
             await deps.ledger.enqueue({
                 channel: channel.id,
@@ -106,14 +119,7 @@ async function fanOutAnswer(event, deps, conversationId) {
 }
 /** The unanswered notice: the origin chat only. */
 async function notifyOrigin(event, deps) {
-    // Find the origin: the LAST input's origin record (the run's final
-    // submission — an album's batch shares one record per submit).
-    let origin;
-    for (const id of [...event.inputs].reverse()) {
-        origin = deps.origins.get(id);
-        if (origin !== undefined)
-            break;
-    }
+    const origin = originKeyOf(deps, event);
     if (origin === undefined) {
         // A run the engine never admitted (webui-started, a job): no chat
         // to notify — the webui shows the failure itself.
@@ -136,15 +142,29 @@ async function notifyOrigin(event, deps) {
         chat: binding.chat,
         kind: "notice",
         message: { chat: binding.chat, text },
+        // Tagged: a replayed settle re-dedupes (the same rule the finals
+        // carry).
+        tag: `notice:${String(event.conversationId)}:${origin.bindingKey}`,
     });
 }
+/**
+ * The origin record of the event's run: the LAST input's record (the
+ * run's final submission — an album's batch shares one record per
+ * submit). Undefined when the engine never admitted the run.
+ */
+function originKeyOf(deps, event) {
+    for (const id of [...event.inputs].reverse()) {
+        const origin = deps.origins.get(id);
+        if (origin !== undefined)
+            return origin;
+    }
+    return undefined;
+}
 /** The binding's user: the DM's resolved user (allowlist then link —
- *  the SAME resolution the admission ran), the group owner for a group (M7). */
-async function bindingUser(deps, key, chat) {
+ *  the SAME resolution the admission ran), the group owner for a group (M7).
+ *  The config is the CALLER's (the fan-out already verified it present). */
+async function bindingUser(deps, config, key, chat) {
     const channel = key.split(":")[0] ?? "";
-    const config = await deps.configOf(channel);
-    if (config === undefined)
-        return undefined;
     if (chat.chatType === "dm") {
         // A DM binding's chat id IS the platform sender id: the admission's
         // own resolution (allowlist first, then the stored link) — the

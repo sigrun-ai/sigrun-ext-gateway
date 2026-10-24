@@ -56,15 +56,19 @@ export declare class DeliveryWorker {
     private inFlight;
     /** The cancel for the armed retry timer. */
     private cancelRetry;
-    /** Deadline ms for the current drain (0 = no drain running). */
-    private drainDeadline;
     constructor(channel: ChannelContribution, ledger: Ledger, deps: DeliveryDeps);
-    /** Start the loop if idle (the enqueue-side poke). */
+    /** Start the loop if idle (the enqueue-side poke). A no-op while a
+     *  drain owns the queue (the drain IS the loop until it resolves). */
     kick(): void;
     /**
      * Send until the ledger's channel queue is empty or `deadlineMs`
-     * (absolute clock ms) passes. Retries already scheduled fire on
-     * their own timers — drain does not wait them out.
+     * (absolute clock ms) passes. The drain TAKES OWNERSHIP of the
+     * queue: `busy` is set for its duration (a kick during a drain is a
+     * no-op), the armed retry timer is CANCELLED (the drain pulls the
+     * re-pended entry directly — no timer-driven second loop races
+     * it), and any in-flight loop is joined first. Retries are NOT
+     * waited out: a retry-armed entry parks the drain (the entry stays
+     * pending; the next boot's recovery resends it).
      */
     drain(deadlineMs: number): Promise<void>;
     /** Cancel the retry timer and join the in-flight send. Idempotent. */

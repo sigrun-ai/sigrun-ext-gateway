@@ -29,6 +29,7 @@ import type { ActionEvent, ChannelContribution, InboundEvent, SigrunHost, Submis
 import type { SubmissionId } from "@earendil-works/pi-durable";
 import type { ChannelConfig } from "../config.js";
 import type { EngineLog } from "../log.js";
+import { BindingStore } from "../state/bindings.js";
 import { IdentityStore } from "../state/identities.js";
 import { PairingStore } from "../access/pairing.js";
 import { LinkCodes } from "../access/link-codes.js";
@@ -87,6 +88,11 @@ export interface PipelineDeps {
     readonly log: EngineLog;
     /** submissionId → the origin record (the outbound seam). */
     readonly origins: Map<SubmissionId, SubmissionOrigin>;
+    /** The engine-wide binding store (the settled fan-out and the
+     *  delivery workers share this ONE instance — cross-instance writes
+     *  would interleave JsonFile queues and lose updates). Absent → a
+     *  private instance (the stand-alone Task 3 shape). */
+    readonly bindings?: BindingStore;
     /** The injectable stages (§8.4 steps 7, 8, 9). */
     readonly stages?: PipelineStages;
     /** The engine-wide access state (Task 4). Absent → a private one. */

@@ -69,8 +69,9 @@ describe("splitMarkdown (limit 40)", () => {
 		// The LAST chunk terminates the fence (the splitter closes what the
 		// model left open — every emitted chunk is well-formed alone).
 		expect(chunks.at(-1)?.endsWith("```")).toBe(true);
-		// The first fence marker stays in chunk 0.
-		expect(chunks[0]).toContain("```");
+		// The opening fence marker stays in its own chunk (the paragraph
+		// break before it splits “Start.” onto its own chunk).
+		expect(chunks.find((c) => c.includes("```"))?.startsWith("```")).toBe(true);
 		for (const chunk of chunks) {
 			expect(chunk.length).toBeLessThanOrEqual(40);
 		}
@@ -85,6 +86,56 @@ describe("splitMarkdown (limit 40)", () => {
 		for (const chunk of chunks) {
 			expect(chunk.length).toBeLessThanOrEqual(40);
 		}
+	});
+
+	test("a fenced block whose body fills the limit stays within the limit (close-suffix reservation)", () => {
+		// 37 chars of body + the flush-appended close (\n```) = 41 > 40:
+		// the close cost must be reserved in the fit check.
+		const body = "x".repeat(37);
+		const text = `\`\`\`js\n${body}\n\`\`\``;
+		const chunks = splitMarkdown(text, 40);
+		expect(chunks.length).toBeGreaterThan(0);
+		for (const chunk of chunks) {
+			expect(chunk.length).toBeLessThanOrEqual(40);
+		}
+		// Well-formed: every interior chunk closes; the reopens carry the info.
+		const withBody = chunks.find((c) => c.includes(body.slice(0, 10)));
+		expect(withBody?.endsWith("```")).toBe(true);
+	});
+
+	test("an unbroken fence body fills the limit with a long info string (no blank lines)", () => {
+		// "typescript" reopens 13 chars wide: the hard-split reserve must
+		// come from the ACTUAL info string, not a fixed 8.
+		const body = "y".repeat(200);
+		const text = "```typescript\n" + body + "\n```";
+		const chunks = splitMarkdown(text, 40);
+		expect(chunks.length).toBeGreaterThan(2);
+		for (const chunk of chunks) {
+			expect(chunk.length).toBeLessThanOrEqual(40);
+		}
+		// Every chunk after the first reopens with the info string.
+		for (const chunk of chunks.slice(1)) {
+			expect(chunk.startsWith("```typescript")).toBe(true);
+		}
+	});
+
+	test("a blank line INSIDE a fenced block splits with close + reopen of the info string", () => {
+		// The fence branch must handle the paragraph break: the chunk after
+		// the mid-fence blank line reopens with the info string.
+		const text =
+			"```js\nconst a = 1; alpha line of text\n\nconst b = 2; bravo line of text\n```";
+		const chunks = splitMarkdown(text, 40);
+		expect(chunks.length).toBeGreaterThan(1);
+		for (const chunk of chunks) {
+			expect(chunk.length).toBeLessThanOrEqual(40);
+		}
+		// The chunk that holds the second statement reopens with ```js.
+		const second = chunks.find((c) => c.includes("const b"));
+		expect(second).toBeDefined();
+		expect(second?.startsWith("```js")).toBe(true);
+		// The chunk before it closed the fence.
+		const first = chunks.find((c) => c.includes("const a"));
+		expect(first?.endsWith("```")).toBe(true);
 	});
 });
 

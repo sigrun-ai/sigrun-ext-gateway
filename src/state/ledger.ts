@@ -72,6 +72,11 @@ export interface LedgerEntry {
 	readonly state: LedgerState;
 	readonly attempts: number;
 	readonly createdAt: number;
+	/** When the entry entered its CURRENT state (clock ms) — the failure
+	 *  window reads THIS, never `createdAt`: an old entry failing NOW is
+	 *  a fresh health signal, not yesterday's. Absent on entries written
+	 *  before the field existed (created-at is the fallback). */
+	readonly stateSince?: number;
 	/** Platform message ids of the delivered send. */
 	readonly receipt?: string[];
 	readonly tag?: string;
@@ -156,6 +161,7 @@ export class Ledger {
 			state: "pending",
 			attempts: 0,
 			createdAt: this.now(),
+			stateSince: this.now(),
 		};
 		const state = await this.file.update((draft) => {
 			if (
@@ -200,6 +206,9 @@ export class Ledger {
 				// keep the count the attempts produced.
 				attempts:
 					state === "attempting" ? row.attempts + 1 : row.attempts,
+				// The state transition stamps its own clock (the failure
+				// window reads it — an old entry failing NOW is fresh).
+				stateSince: this.now(),
 				...(receipt === undefined ? {} : { receipt: [...receipt] }),
 			};
 			draft.entries[index] = next;
@@ -227,10 +236,14 @@ export class Ledger {
 		this.entries = recovered.entries;
 	}
 
-	/** How many entries are `failed` with `createdAt >= ts` (health's window). */
+	/** How many entries are `failed` having FAILED within the window —
+	 *  the state transition's clock, not creation: an old entry failing
+	 *  NOW still degrades health. */
 	failedSince(ts: number): number {
 		return this.entries.filter(
-			(entry) => entry.state === "failed" && entry.createdAt >= ts,
+			(entry) =>
+				entry.state === "failed" &&
+				(entry.stateSince ?? entry.createdAt) >= ts,
 		).length;
 	}
 

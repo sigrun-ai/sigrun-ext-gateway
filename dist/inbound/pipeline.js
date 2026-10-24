@@ -54,9 +54,12 @@ function privateAccess(stateDir, now) {
 }
 export function createPipeline(deps) {
     const now = deps.now ?? Date.now;
-    const bindings = new BindingStore(join(deps.stateDir, "bindings.json"), {
-        now,
-    });
+    // The engine hands ONE store in (every pipeline, the settled fan-out
+    // and the delivery workers share it — cross-instance writes would
+    // interleave separate JsonFile queues and lose updates); the
+    // stand-alone shape constructs its own.
+    const bindings = deps.bindings ??
+        new BindingStore(join(deps.stateDir, "bindings.json"), { now });
     const seen = new SeenSet(join(deps.stateDir, "seen.json"));
     const access = deps.access ??
         privateAccess(deps.stateDir, () => now());

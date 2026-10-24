@@ -372,6 +372,104 @@ describe("DeliveryWorker recovered entries", () => {
 	});
 });
 
+describe("DeliveryWorker drain ownership (review fix 3)", () => {
+	test("drain takes the queue: a kick during a drain is a no-op (no second loop)", async () => {
+		const harness = await rig();
+		await enqueueFinal(harness, "one");
+		// A slow first send holds the drain; a concurrent kick must not
+		// start a second loop (a duplicate send).
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const channel = harness.channel;
+		const original = channel.send.bind(channel);
+		let sends = 0;
+		channel.send = (async (message: OutboundMessage) => {
+			sends++;
+			if (sends === 1) await gate;
+			return original(message);
+		}) as typeof channel.send;
+		const draining = harness.worker.drain(1_000_000_000);
+		// The drain is in flight (the virtual clock never advances; the
+		// send gate holds it). A kick while draining must be a no-op.
+		harness.worker.kick();
+		release();
+		await draining;
+		expect(harness.channel.sent.map((m) => m.text)).toEqual(["one"]);
+		await harness.worker.stop();
+	});
+
+	test("drain cancels the armed retry and re-pulls the entry directly (no timer race)", async () => {
+		const harness = await rig();
+		await enqueueFinal(harness, "one");
+		// Attempt 1 fails transient → a retry timer is armed at +1 s.
+		harness.channel.failWith("transient");
+		harness.worker.kick();
+		await harness.clock.advance(0);
+		expect(harness.channel.sent).toHaveLength(0);
+		// The drain takes ownership: the retry timer is cancelled, the
+		// re-pended entry sends directly (no duplicate via the timer).
+		const sentBefore = harness.channel.sent.length;
+		await harness.drain(1_000_000);
+		expect(harness.channel.sent.slice(sentBefore).map((m) => m.text)).toEqual([
+			"one",
+		]);
+		// Advancing the (cancelled) retry timer changes nothing.
+		await harness.clock.advance(60_000);
+		expect(harness.channel.sent.slice(sentBefore)).toHaveLength(1);
+		await harness.worker.stop();
+	});
+});
+
+describe("DeliveryWorker ledger-mark failures (review fix 4)", () => {
+	test("a failing attempting mark logs and parks the entry (no send, no silent stall)", async () => {
+		const harness = await rig();
+		const id = await enqueueFinal(harness, "one");
+		// The ledger's NEXT mark rejects: sendOne must log it and not send.
+		const errors: string[] = [];
+		const log = {
+			info: () => {},
+			warn: (msg: string) => errors.push(msg),
+			error: (msg: string, _e?: unknown) => errors.push(msg),
+			debug: () => {},
+			once: () => {},
+		};
+		const worker = new DeliveryWorker(harness.channel, harness.ledger, {
+			bindings: harness.bindings,
+			timeoutMs: 60_000,
+			delays: [1000, 5000, 30000],
+			setTimer: harness.clock.setTimer,
+			now: harness.clock.now,
+			log,
+		});
+		const original = harness.ledger.mark.bind(harness.ledger);
+		let failed = false;
+		harness.ledger.mark = (async (mid: string, state: string, receipt?: readonly string[]) => {
+			if (!failed && state === "attempting") {
+				failed = true;
+				throw new Error("ledger unavailable");
+			}
+			return original(mid, state as Parameters<typeof original>[1], receipt);
+		}) as typeof harness.ledger.mark;
+		worker.kick();
+		await harness.clock.advance(0);
+		// No send ran (the entry was never marked attempting — sending an
+		// unmarked entry would double-send after recovery).
+		expect(harness.channel.sent).toHaveLength(0);
+		// The failure was logged (never a silent empty catch).
+		expect(errors.some((line) => line.includes("ledger unavailable"))).toBe(true);
+		// The worker is not wedged: the entry stays pending and a later
+		// kick (the ledger recovered) delivers it.
+		harness.ledger.mark = original;
+		worker.kick();
+		await harness.clock.advance(0);
+		expect(harness.channel.sent.map((m) => m.text)).toEqual(["one"]);
+		void id;
+		await worker.stop();
+	});
+});
+
 describe("DeliveryWorker stop", () => {
 	test("stop cancels pending retries and resolves drain", async () => {
 		const harness = await rig();

@@ -253,6 +253,9 @@ export function createEngine(
 			log: channelLog,
 			origins,
 			access,
+			// The ONE engine-wide binding store — the fan-out and the delivery
+			// workers share this exact instance (see its declaration).
+			bindings,
 		});
 		pipelines.push(receivePipeline);
 		return {
@@ -311,6 +314,12 @@ export function createEngine(
 			log: channelLog,
 		};
 	};
+	// The Task 6 streaming seam's stub (false — no stream owns delivery
+	// yet; Task 6 replaces this closure with the StreamRegistry). Declared
+	// before the deps closure that reads it.
+	const streamsStub: Streams = {
+		finalize: async () => false,
+	};
 	/** The settled-run fan-out deps (the factory's `runSettled` closes over
 	 *  these — the same stores the pipelines and commands share, plus the
 	 *  delivery ledger and the Task 6 streaming stub). */
@@ -330,11 +339,6 @@ export function createEngine(
 		streams: streamsStub,
 		log,
 	});
-	// The Task 6 streaming seam's stub (false — no stream owns delivery
-	// yet; Task 6 replaces this closure with the StreamRegistry).
-	const streamsStub: Streams = {
-		finalize: async () => false,
-	};
 
 	const ctxLog = (scope: string): EngineLog => ({
 		info: (msg) => log.info(`[${scope}] ${msg}`),
@@ -482,11 +486,13 @@ export function createEngine(
 					log: createLog(`channel:${id}`),
 				});
 				workers.set(id, worker);
-				// Recovered/pending entries from a prior boot flow NOW.
-				worker.kick();
 				// The first attempt settles before start resolves (running
 				// or backoff — a failing adapter never wedges boot).
 				await supervisor.start(ctx.signal);
+				// The recovery kick runs only once the ADAPTER is live (or in
+				// backoff): a send before the adapter connected would burn the
+				// entry's first attempt on a transport that cannot take it.
+				worker.kick();
 			}
 		},
 

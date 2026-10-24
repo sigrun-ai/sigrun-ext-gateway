@@ -16,6 +16,12 @@
  * the end (the last chunk's close terminates it — every emitted chunk
  * is well-formed on its own).
  *
+ * Every EMITTED chunk respects the limit: the close suffix a
+ * fence-interior chunk carries ("\n```") is reserved in each fit
+ * check, and hard-split pieces shrink by the ACTUAL reopen width
+ * (info string included — "typescript" reopens 13 chars wide, so a
+ * fixed reserve under-sizes pieces).
+ *
  * The join of the chunks is a lossless representation of the input
  * apart from the inserted fence markers and the whitespace the
  * paragraph/line splits consumed.

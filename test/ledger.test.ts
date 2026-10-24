@@ -178,6 +178,20 @@ describe("Ledger restart recovery", () => {
 });
 
 describe("Ledger failedSince and prune", () => {
+	test("an OLD entry failing NOW still counts (the failure clock is the transition, not creation)", async () => {
+		const path = join(await tempDir(), "ledger.json");
+		let now = 1_000;
+		const ledger = new Ledger(path, { now: () => now });
+		const entry = await ledger.enqueue(input());
+		// A day passes before the entry fails.
+		now = 1_000 + 86_400_000;
+		await ledger.mark(entry!.id, "failed");
+		// The failure is within the last hour even though the entry was
+		// created a day ago.
+		expect(ledger.failedSince(now - 3_600_000)).toBe(1);
+		expect(ledger.failedSince(1_000)).toBe(1);
+	});
+
 	test("failedSince counts failed entries created after the timestamp", async () => {
 		const ledger = new Ledger(join(await tempDir(), "ledger.json"), {
 			now: () => 1000,

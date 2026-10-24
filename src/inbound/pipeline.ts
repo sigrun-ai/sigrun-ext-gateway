@@ -119,6 +119,11 @@ export interface PipelineDeps {
 	readonly log: EngineLog;
 	/** submissionId → the origin record (the outbound seam). */
 	readonly origins: Map<SubmissionId, SubmissionOrigin>;
+	/** The engine-wide binding store (the settled fan-out and the
+	 *  delivery workers share this ONE instance — cross-instance writes
+	 *  would interleave JsonFile queues and lose updates). Absent → a
+	 *  private instance (the stand-alone Task 3 shape). */
+	readonly bindings?: BindingStore;
 	/** The injectable stages (§8.4 steps 7, 8, 9). */
 	readonly stages?: PipelineStages;
 	/** The engine-wide access state (Task 4). Absent → a private one. */
@@ -193,9 +198,13 @@ function privateAccess(stateDir: string, now: () => number): AccessState {
 
 export function createPipeline(deps: PipelineDeps): PipelineHandle {
 	const now = deps.now ?? Date.now;
-	const bindings = new BindingStore(join(deps.stateDir, "bindings.json"), {
-		now,
-	});
+	// The engine hands ONE store in (every pipeline, the settled fan-out
+	// and the delivery workers share it — cross-instance writes would
+	// interleave separate JsonFile queues and lose updates); the
+	// stand-alone shape constructs its own.
+	const bindings =
+		deps.bindings ??
+		new BindingStore(join(deps.stateDir, "bindings.json"), { now });
 	const seen = new SeenSet(join(deps.stateDir, "seen.json"));
 	const access =
 		deps.access ??

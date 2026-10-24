@@ -16,6 +16,12 @@
  * the end (the last chunk's close terminates it — every emitted chunk
  * is well-formed on its own).
  *
+ * Every EMITTED chunk respects the limit: the close suffix a
+ * fence-interior chunk carries ("\n```") is reserved in each fit
+ * check, and hard-split pieces shrink by the ACTUAL reopen width
+ * (info string included — "typescript" reopens 13 chars wide, so a
+ * fixed reserve under-sizes pieces).
+ *
  * The join of the chunks is a lossless representation of the input
  * apart from the inserted fence markers and the whitespace the
  * paragraph/line splits consumed.
@@ -38,6 +44,11 @@ export function splitMarkdown(text, limit) {
     let openFence;
     /** Reconstructed open-fence line for reopening (with info string). */
     const fenceReopen = () => "```" + (openFence === undefined ? "" : openFence);
+    /** The close suffix a chunk ending inside an open fence carries
+     *  ("\n```") — reserved in EVERY fit check so an emitted chunk can
+     *  never exceed the limit (the reservation is pessimistic: a chunk
+     *  the input's own close line terminates simply comes out smaller). */
+    const CLOSE_COST = 4;
     const flush = () => {
         if (current.length === 0)
             return;
@@ -51,101 +62,164 @@ export function splitMarkdown(text, limit) {
         current = [];
         currentLength = 0;
     };
-    const pushLine = (line, lineLength) => {
-        const joinCost = current.length === 0 ? 0 : 1;
-        if (currentLength + joinCost + lineLength <= limit) {
-            current.push(line);
-            currentLength += joinCost + lineLength;
-            return;
-        }
-        // The line does not fit: close the current chunk, then place the
-        // line (hard-splitting it if it alone exceeds the limit).
+    /**
+     * Close the current chunk and reopen the fence when one is open —
+     * the shared split point for every path that starts a fresh chunk
+     * (line overflow, paragraph boundary, hard-split pieces).
+     */
+    const closeAndReopen = () => {
         flush();
         if (fenceOpen) {
-            // Reopen the fence at the head of the new chunk.
             const reopen = fenceReopen();
             current.push(reopen);
             currentLength = reopen.length;
         }
-        if (lineLength <= limit) {
+    };
+    const pushLine = (line, lineLength) => {
+        // A chunk that STARTS inside an open fence carries the reopen as
+        // its head line — the well-formed invariant (every chunk is a
+        // standalone fence) holds no matter which path emptied the chunk.
+        if (current.length === 0 && fenceOpen) {
+            const reopen = fenceReopen();
+            current.push(reopen);
+            currentLength = reopen.length;
+        }
+        const joinCost = current.length === 0 ? 0 : 1;
+        const closeCost = fenceOpen ? CLOSE_COST : 0;
+        if (currentLength + joinCost + lineLength + closeCost <= limit) {
             current.push(line);
-            currentLength += lineLength;
+            currentLength += joinCost + lineLength;
             return;
         }
-        // The line alone exceeds the limit: hard-split it. The reopen
-        // prefix pushed above is dropped first — hardSplit re-arms its own
-        // reopen per piece, so starting from an empty chunk keeps every
-        // piece's overhead accounted.
+        // The line does not fit: split the chunk (close + reopen when a
+        // fence is open), then place the line — hard-splitting it when
+        // even a fresh chunk cannot hold reopen + line + close.
+        closeAndReopen();
+        const prefixCost = fenceOpen ? currentLength + 1 : 0;
+        if (prefixCost + lineLength + closeCost <= limit) {
+            current.push(line);
+            currentLength += (prefixCost === 0 ? 0 : 1) + lineLength;
+            return;
+        }
+        // The line alone exceeds even a fresh chunk's budget: hard-split
+        // it (the reopen prefix is dropped first — hardSplit re-arms its
+        // own reopen per piece, so every piece's overhead is accounted).
         current = [];
         currentLength = 0;
         hardSplit(line);
     };
-    // Fence overhead: a chunk inside a fence may need a reopen prefix
-    // ("\n```" leading) and a close suffix ("\n```"); hard-split pieces
-    // shrink by that budget so every EMITTED chunk respects the limit.
-    /** Hard-split one overlong line into limit-sized pieces. */
+    /**
+     * Hard-split one overlong line into pieces sized for the fence
+     * overhead (the ACTUAL info string, not a fixed reserve). Each piece
+     * chunk carries reopen + join + piece + close when a fence is open,
+     * so the piece limit is the limit minus that overhead — and every
+     * piece chunk STARTS with the reopen (the prefix is armed per piece,
+     * never inherited from a dropped head).
+     */
     const hardSplit = (line) => {
-        const pieceLimit = Math.max(1, limit - (fenceOpen ? 8 : 0));
+        const reopen = fenceOpen ? fenceReopen() : undefined;
+        const overhead = reopen === undefined ? 0 : reopen.length + 1 + CLOSE_COST;
+        const pieceLimit = Math.max(1, limit - overhead);
+        const emit = (piece) => {
+            if (reopen === undefined) {
+                current.push(piece);
+                currentLength = piece.length;
+            }
+            else {
+                current.push(reopen, piece);
+                currentLength = reopen.length + 1 + piece.length;
+            }
+            // flush appends the close when a fence is open; the next piece
+            // re-arms its own reopen.
+            flush();
+        };
         let start = 0;
         for (;;) {
             const remaining = line.length - start;
             if (remaining <= pieceLimit) {
-                pushLine(line.slice(start), remaining);
+                emit(line.slice(start));
                 return;
             }
-            const piece = line.slice(start, start + pieceLimit);
+            emit(line.slice(start, start + pieceLimit));
             start += pieceLimit;
-            // A piece that would end inside a fence still closes at flush;
-            // fence bookkeeping happens per LINE below.
-            current.push(piece);
-            currentLength = piece.length;
-            flush();
-            if (fenceOpen) {
-                const reopen = fenceReopen();
-                current.push(reopen);
-                currentLength = reopen.length;
-            }
         }
     };
     let paragraphBreak = false;
     for (const line of lines) {
         const trimmed = line.trim();
         if (trimmed === "") {
-            // A blank line: a paragraph boundary candidate. Flush on the
-            // NEXT non-blank line only when the paragraph after it fits
-            // better alone — the simplest honest rule: flush when the
-            // current chunk already holds content (paragraphs prefer
-            // chunk isolation) AND the text has more content coming.
+            // A blank line: a paragraph boundary candidate — INSIDE a fence
+            // too (the split still closes and reopens, keeping every chunk
+            // well-formed; a mid-fence blank line is content, but a split
+            // point there is honest when the chunk is full).
             if (current.length > 0)
                 paragraphBreak = true;
             continue;
         }
+        if (paragraphBreak) {
+            // Split at the paragraph boundary: close (+ reopen inside a
+            // fence) so the next chunk starts well-formed. Fence marker
+            // lines arrive here too — a blank line before a close marker
+            // still splits with the pair.
+            if (current.length > 0)
+                closeAndReopen();
+            paragraphBreak = false;
+        }
         const fenceMatch = /^```(.*)$/.exec(trimmed);
         if (fenceMatch !== null) {
             if (!fenceOpen) {
-                // Opening a fence: the info string rides the reopen prefix.
+                // Opening a fence: the info string rides the reopen prefix. The
+                // marker line is pushed RAW (the reopen arming in pushLine must
+                // not duplicate it — the marker IS the chunk's fence head).
                 fenceOpen = true;
                 openFence = fenceMatch[1] ?? "";
                 openFence = openFence === "" ? undefined : openFence;
-                // Render the canonical opening line (no trailing spaces).
-                pushLine("```" + (openFence === undefined ? "" : openFence), 3 + (openFence === undefined ? 0 : openFence.length));
+                const marker = "```" + (openFence === undefined ? "" : openFence);
+                const joinCost = current.length === 0 ? 0 : 1;
+                const closeCost = CLOSE_COST;
+                if (currentLength + joinCost + marker.length + closeCost <= limit) {
+                    current.push(marker);
+                    currentLength += joinCost + marker.length;
+                }
+                else {
+                    // The marker does not fit: close the current chunk; the
+                    // marker starts the fresh one (a chunk-broken fence is still
+                    // well-formed — flush closes what was open, the marker opens).
+                    flush();
+                    current.push(marker);
+                    currentLength = marker.length;
+                }
                 continue;
             }
-            // Closing a fence.
-            pushLine("```", 3);
+            // Closing a fence: when the current chunk is empty (or holds only
+            // the armed reopen), the PREVIOUS chunk's flush suffix already
+            // closed the fence — emitting the marker would add an empty-fence
+            // chunk, so it is dropped. Otherwise the marker lands normally,
+            // WITHOUT arming a fresh reopen when it overflows (the close is
+            // terminal: a reopened fence just to hold its own terminator is
+            // noise).
+            const onlyReopen = current.length === 1 && current[0] === fenceReopen();
+            if (current.length === 0 || onlyReopen) {
+                current = [];
+                currentLength = 0;
+            }
+            else {
+                const joinCost = current.length === 0 ? 0 : 1;
+                if (currentLength + joinCost + 3 <= limit) {
+                    current.push("```");
+                    currentLength += joinCost + 3;
+                }
+                else {
+                    // The marker does not fit: the chunk closes WITHOUT arming a
+                    // reopen (fenceOpen flips to false first, so flush's suffix
+                    // closes what stands).
+                    fenceOpen = false;
+                    flush();
+                }
+            }
             fenceOpen = false;
             openFence = undefined;
             continue;
-        }
-        if (paragraphBreak) {
-            // Prefer a paragraph split: the current chunk is closed and the
-            // line starts a fresh chunk (the hard-split fallback inside
-            // pushLine still applies when the LINE itself overflows).
-            const wouldFit = currentLength === 0 ||
-                currentLength + 1 + line.length <= limit;
-            if (currentLength > 0 || !wouldFit)
-                flush();
-            paragraphBreak = false;
         }
         pushLine(line, line.length);
     }
@@ -188,13 +262,12 @@ function stripHeading(line) {
 /** Strip emphasis and rewrite links on ONE line. */
 function stripInline(line) {
     // Links first: their text may carry emphasis.
-    let text = line.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_all, label, url) => `${label} (${url})`);
+    const text = line.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_all, label, url) => `${label} (${url})`);
     // Bold + italics markers (`**`, `__`, `*`, `_` pairs).
-    text = text
+    return text
         .replace(/\*\*([^*]+)\*\*/g, "$1")
         .replace(/__([^_]+)__/g, "$1")
-        .replace(/\*([^*]+)\*/g, "$1");
-    // Inline code markers.
-    text = text.replace(/`([^`]+)`/g, "$1");
-    return text;
+        .replace(/\*([^*]+)\*/g, "$1")
+        // Inline code markers.
+        .replace(/`([^`]+)`/g, "$1");
 }

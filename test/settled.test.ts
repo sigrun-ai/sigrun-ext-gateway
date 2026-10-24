@@ -273,6 +273,26 @@ describe("onRunSettled: access re-check (M7)", () => {
 		expect(harness.ledger.nextPending("loop")).toBeUndefined();
 	});
 
+	test("an unavailable channel config skips WITHOUT unbinding (review fix 7)", async () => {
+		const harness = await rig();
+		await harness.bindings.bind(KEY, 7, CHAT);
+		const warnings: string[] = [];
+		const deps: SettledDeps = {
+			...harness.deps,
+			// The channel block is {failed} — a config typo, not a revoked share.
+			configOf: async () => undefined,
+			log: {
+				...silentLog(),
+				warn: (msg: string) => warnings.push(msg),
+			},
+		};
+		await onRunSettled(answeredEvent(7, "the answer"), deps);
+		// The binding is RETAINED (a config typo never deletes chats).
+		expect(harness.bindings.get(KEY)).toBeDefined();
+		expect(harness.ledger.nextPending("loop")).toBeUndefined();
+		expect(warnings.some((line) => line.includes("binding kept"))).toBe(true);
+	});
+
 	test("an owner's own conversation still delivers", async () => {
 		const harness = await rig();
 		await harness.bindings.bind(KEY, 7, CHAT);
@@ -345,6 +365,22 @@ describe("onRunSettled: unanswered runs", () => {
 		expect(entry?.message.text).toBe("Stopped.");
 	});
 
+	test("a replayed unanswered settle dedupes through the notice tag", async () => {
+		const harness = await rig();
+		await harness.bindings.bind(KEY, 7, CHAT);
+		harness.deps.origins.set(1 as SubmissionId, {
+			bindingKey: KEY,
+			channel: "loop",
+		});
+		await onRunSettled(unansweredEvent(7, "model_error"), harness.deps);
+		const first = harness.ledger.nextPending("loop");
+		expect(first?.message.text).toContain("model_error");
+		await harness.ledger.mark(first!.id, "delivered");
+		// The replay (the platform redelivered the settle) enqueues nothing.
+		await onRunSettled(unansweredEvent(7, "model_error"), harness.deps);
+		expect(harness.ledger.nextPending("loop")).toBeUndefined();
+	});
+
 	test("no origin (a webui-started run that failed to start) enqueues nothing", async () => {
 		const harness = await rig();
 		await onRunSettled(unansweredEvent(7, "model_error"), harness.deps);
@@ -353,17 +389,16 @@ describe("onRunSettled: unanswered runs", () => {
 });
 
 describe("onRunSettled: the streaming hand-off stub", () => {
-	test("streams.finalize is consulted (the Task 6 seam) and false enqueues finals", async () => {
+	test("streams.finalize is consulted once per conversation; false enqueues finals", async () => {
 		const harness = await rig();
 		await harness.bindings.bind(KEY, 7, CHAT);
 		let finalizeCalls = 0;
 		const deps: SettledDeps = {
 			...harness.deps,
 			streams: {
-				finalize: async (conversationId: number, chunks: readonly string[]) => {
+				finalize: async (conversationId: number) => {
 					finalizeCalls++;
 					expect(conversationId).toBe(7);
-					expect(chunks[0]).toBe("the answer");
 					return false;
 				},
 			},
@@ -371,5 +406,48 @@ describe("onRunSettled: the streaming hand-off stub", () => {
 		await onRunSettled(answeredEvent(7, "the answer"), deps);
 		expect(finalizeCalls).toBe(1);
 		expect(harness.ledger.nextPending("loop")?.message.text).toBe("the answer");
+	});
+
+	test("finalize owning the stream skips only the ORIGIN chat; other bound chats still enqueue (review fix 5)", async () => {
+		const harness = await rig();
+		const otherChat: ChatRef = { chatId: "200000002", chatType: "dm" };
+		const otherKey = bindingKey("loop", otherChat);
+		await harness.bindings.bind(KEY, 7, CHAT);
+		await harness.bindings.bind(otherKey, 7, otherChat);
+		// The other chat's DM resolves to bob (a second directory user).
+		await harness.identities.link("loop", "200000002", "bob", "pairing", otherChat);
+		const deps: SettledDeps = {
+			...harness.deps,
+			configOf: async () => {
+				const parsed = parseGatewayConfig({
+					channels: {
+						loop: {
+							dm: "allowlist",
+							allow: [
+								{ sender: "100000001", user: "alice" },
+								{ sender: "200000002", user: "bob" },
+							],
+						},
+					},
+				});
+				return parsed.channels.loop as ChannelConfig;
+			},
+			streams: { finalize: async () => true },
+			// The run came from THIS chat (the origin record).
+			origins: new Map<SubmissionId, SubmissionOrigin>([
+				[1 as SubmissionId, { bindingKey: KEY, channel: "loop" }],
+			]),
+		};
+		await onRunSettled(answeredEvent(7, "the answer"), deps);
+		// The origin chat's final is owned by the stream: NOTHING for it.
+		const entries: string[] = [];
+		for (;;) {
+			const entry = harness.ledger.nextPending("loop");
+			if (entry === undefined) break;
+			entries.push(entry.bindingKey ?? "");
+			await harness.ledger.mark(entry.id, "delivered");
+		}
+		// The OTHER chat still got its final.
+		expect(entries).toEqual([otherKey]);
 	});
 });

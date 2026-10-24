@@ -36,8 +36,9 @@ export declare const STOPPED = "Stopped.";
 /**
  * The streaming hand-off seam (Task 6). `finalize` receives the
  * conversation id and the rendered chunks; it returns TRUE when the
- * stream owned delivery (the finals were already sent/edited — the
- * settled path enqueues nothing). The Task 5 stub returns false.
+ * stream owned delivery (the finals were already sent/edited). The
+ * Task 5 stub returns false. Ownership covers the STREAMED chat (the
+ * origin chat) — the rest of the fan-out still enqueues.
  */
 export interface Streams {
     finalize(conversationId: number, chunks: readonly string[]): Promise<boolean>;
