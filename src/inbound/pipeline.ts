@@ -58,6 +58,7 @@ import { redeemLink } from "../commands/link.js";
 import { approvePairing, denyPairing } from "../commands/pair.js";
 import { handleChatCommand } from "../commands/chat.js";
 import type { GroupConfig } from "../config.js";
+import { admitGroupEvent, ensureGroupShare } from "./groups.js";
 
 /** A receive's terminal outcome (the adapter acks on any resolution). */
 export type PipelineOutcome =
@@ -319,20 +320,62 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 			return { outcome: "command" };
 		}
 
-		// Step 5 — access (§8.2). DMs resolve through the allowlist then
-		// links; an unknown DM sender's treatment follows the channel's
-		// `dm` policy. Groups arrive with Task 8's admission stage;
-		// everything else drops.
+		// Step 5 — access (§8.2). Groups read their row from the live
+		// config per event; removing a row stops admission without
+		// deleting the chat's durable binding (Review Focus 3).
+		let user: string;
+		let commandUser: string | undefined;
+		let owner: string;
+		let group: GroupConfig | undefined;
+		let senderLabel = event.sender.name ?? event.sender.id;
 		if (event.chat.chatType !== "dm") {
-			return dropped();
-		}
-		const resolved = access.identities.userFor(
-			config,
-			channelId,
-			event.sender.id,
-		);
-		if (resolved === undefined) {
-			return await unknownDm(channelId, event, config);
+			const admission = admitGroupEvent(
+				config,
+				channelId,
+				event,
+				access.identities,
+			);
+			if (!admission.admit) {
+				if (admission.reason === "unlisted" || admission.reason === "failed") {
+					deps.log.once(
+						`group-${admission.reason}:${channelId}:${event.chat.chatId}`,
+						"warn",
+						`group message dropped (${admission.reason}, channel "${channelId}")`,
+					);
+				} else if (admission.reason === "unlinked") {
+					const day = Math.floor(now() / 86_400_000);
+					deps.log.once(
+						`group-unlinked:${channelId}:${event.sender.id}:${day}`,
+						"warn",
+						`group message from unlinked sender dropped (channel "${channelId}")`,
+					);
+				}
+				return dropped();
+			}
+			user = admission.user;
+			// Unlinked anyone senders submit under the owner but never
+			// control the conversation or invoke commands (§8.2).
+			commandUser = admission.linked ? admission.user : undefined;
+			owner = admission.group.owner;
+			group = admission.group;
+			if (admission.linked) {
+				const directoryUser = await deps.host.users.get(admission.user);
+				senderLabel = directoryUser?.name ?? admission.user;
+			} else {
+				senderLabel = admission.senderLabel;
+			}
+		} else {
+			const resolved = access.identities.userFor(
+				config,
+				channelId,
+				event.sender.id,
+			);
+			if (resolved === undefined) {
+				return await unknownDm(channelId, event, config);
+			}
+			user = resolved.user;
+			commandUser = user;
+			owner = user;
 		}
 
 		// The bound conversation, or a fresh one for an unbound chat.
@@ -343,9 +386,21 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 		let conversationId: ConversationId;
 		if (binding === undefined) {
 			conversationId = (await deps.host.conversations.create({
-				owner: resolved.user,
+				owner,
 				source: "gateway",
-				name: event.chat.title ?? `${deps.channel.label} DM`,
+				name:
+					event.chat.title ??
+					`${deps.channel.label} ${group === undefined ? "DM" : "group"}`,
+				...(group?.members !== "anyone"
+					? {}
+					: {
+							agent: {
+								tools: group.tools,
+								...(group.extensions === undefined
+									? {}
+									: { extensions: group.extensions }),
+							},
+						}),
 			})) as ConversationId;
 			await bindings.bind(key, conversationId, event.chat);
 		} else {
@@ -359,16 +414,13 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 				});
 			}
 		}
+		if (group !== undefined && commandUser !== undefined) {
+			await ensureGroupShare(deps.host, conversationId, commandUser);
+		}
 
 		// Step 7 — commands run INLINE (§8.5), before album merging and
-		// the busy submission queue. The group config is context only here;
-		// Task 8 owns group admission itself.
-		const groupRow = config.groups.find(
-			(row) => row.chat === event.chat.chatId,
-		);
-		const group: GroupConfig | undefined =
-			groupRow === undefined || "failed" in groupRow ? undefined : groupRow;
-		// A first-message command acts on the binding admission just
+		// the busy submission queue. A first-message command acts on the
+		// binding admission just created, not on the earlier snapshot.
 		// created, not on the pre-creation `undefined` snapshot.
 		const currentBinding = bindings.get(key) ?? binding;
 		const command = await handleChatCommand(
@@ -389,7 +441,7 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 				channel: channelId,
 				event,
 				bindingKey: key,
-				user: resolved.user,
+				user: commandUser,
 				binding: currentBinding,
 				selfLink: config.selfLink,
 				...(group === undefined ? {} : { group }),
@@ -413,8 +465,8 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 		// Step 6 — the album merge: a group's events become ONE
 		// submission when the window closes; a plain event is its own.
 		const envelopeText = buildEnvelope(event, {
-			group: false,
-			senderLabel: event.sender.name ?? event.sender.id,
+			group: group !== undefined,
+			senderLabel,
 		});
 		const batch = albums.add(key, event, envelopeText);
 		if (batch === undefined) {
@@ -426,7 +478,7 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 				channelId,
 				key,
 				event,
-				resolved.user,
+				user,
 				conversationId,
 				config,
 			);
@@ -434,7 +486,7 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 		}
 
 		// Step 10 — submit.
-		return await submit(channelId, event, key, conversationId, resolved.user, batch, config);
+		return await submit(channelId, event, key, conversationId, user, batch, config);
 	}
 
 	/** Step 5's unknown-DM branch: the channel's `dm` policy (§8.2). */

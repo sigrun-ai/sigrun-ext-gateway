@@ -406,6 +406,11 @@ export async function createFakeHost(
 					...current,
 					...(patch.name === undefined ? {} : { name: patch.name ?? undefined }),
 					...(patch.archived === undefined ? {} : { archived: patch.archived }),
+					...(patch.sharing === undefined
+						? {}
+						: patch.sharing === null
+							? { sharing: undefined }
+							: { sharing: patch.sharing }),
 				};
 				metas.set(id, next);
 				conversationArchived.set(id, next.archived);

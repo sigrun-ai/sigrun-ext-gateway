@@ -39,6 +39,7 @@ import { normalizeCode } from "../access/codes.js";
 import { redeemLink } from "../commands/link.js";
 import { approvePairing, denyPairing } from "../commands/pair.js";
 import { handleChatCommand } from "../commands/chat.js";
+import { admitGroupEvent, ensureGroupShare } from "./groups.js";
 /** The pinned UnservedModelError notice (spec §8.4 M12, exact copy). */
 const UNSERVED_MODEL_NOTICE = "The model <ref> is not available. Use /model to pick another.";
 /** The pinned group refusal for `/link` (spec §8.2, exact copy). */
@@ -135,16 +136,48 @@ export function createPipeline(deps) {
             await sendNotice(event.chat, reply, undefined);
             return { outcome: "command" };
         }
-        // Step 5 — access (§8.2). DMs resolve through the allowlist then
-        // links; an unknown DM sender's treatment follows the channel's
-        // `dm` policy. Groups arrive with Task 8's admission stage;
-        // everything else drops.
+        // Step 5 — access (§8.2). Groups read their row from the live
+        // config per event; removing a row stops admission without
+        // deleting the chat's durable binding (Review Focus 3).
+        let user;
+        let commandUser;
+        let owner;
+        let group;
+        let senderLabel = event.sender.name ?? event.sender.id;
         if (event.chat.chatType !== "dm") {
-            return dropped();
+            const admission = admitGroupEvent(config, channelId, event, access.identities);
+            if (!admission.admit) {
+                if (admission.reason === "unlisted" || admission.reason === "failed") {
+                    deps.log.once(`group-${admission.reason}:${channelId}:${event.chat.chatId}`, "warn", `group message dropped (${admission.reason}, channel "${channelId}")`);
+                }
+                else if (admission.reason === "unlinked") {
+                    const day = Math.floor(now() / 86_400_000);
+                    deps.log.once(`group-unlinked:${channelId}:${event.sender.id}:${day}`, "warn", `group message from unlinked sender dropped (channel "${channelId}")`);
+                }
+                return dropped();
+            }
+            user = admission.user;
+            // Unlinked anyone senders submit under the owner but never
+            // control the conversation or invoke commands (§8.2).
+            commandUser = admission.linked ? admission.user : undefined;
+            owner = admission.group.owner;
+            group = admission.group;
+            if (admission.linked) {
+                const directoryUser = await deps.host.users.get(admission.user);
+                senderLabel = directoryUser?.name ?? admission.user;
+            }
+            else {
+                senderLabel = admission.senderLabel;
+            }
         }
-        const resolved = access.identities.userFor(config, channelId, event.sender.id);
-        if (resolved === undefined) {
-            return await unknownDm(channelId, event, config);
+        else {
+            const resolved = access.identities.userFor(config, channelId, event.sender.id);
+            if (resolved === undefined) {
+                return await unknownDm(channelId, event, config);
+            }
+            user = resolved.user;
+            commandUser = user;
+            owner = user;
         }
         // The bound conversation, or a fresh one for an unbound chat.
         const binding = bindings.get(key);
@@ -154,9 +187,20 @@ export function createPipeline(deps) {
         let conversationId;
         if (binding === undefined) {
             conversationId = (await deps.host.conversations.create({
-                owner: resolved.user,
+                owner,
                 source: "gateway",
-                name: event.chat.title ?? `${deps.channel.label} DM`,
+                name: event.chat.title ??
+                    `${deps.channel.label} ${group === undefined ? "DM" : "group"}`,
+                ...(group?.members !== "anyone"
+                    ? {}
+                    : {
+                        agent: {
+                            tools: group.tools,
+                            ...(group.extensions === undefined
+                                ? {}
+                                : { extensions: group.extensions }),
+                        },
+                    }),
             }));
             await bindings.bind(key, conversationId, event.chat);
         }
@@ -171,12 +215,12 @@ export function createPipeline(deps) {
                 });
             }
         }
+        if (group !== undefined && commandUser !== undefined) {
+            await ensureGroupShare(deps.host, conversationId, commandUser);
+        }
         // Step 7 — commands run INLINE (§8.5), before album merging and
-        // the busy submission queue. The group config is context only here;
-        // Task 8 owns group admission itself.
-        const groupRow = config.groups.find((row) => row.chat === event.chat.chatId);
-        const group = groupRow === undefined || "failed" in groupRow ? undefined : groupRow;
-        // A first-message command acts on the binding admission just
+        // the busy submission queue. A first-message command acts on the
+        // binding admission just created, not on the earlier snapshot.
         // created, not on the pre-creation `undefined` snapshot.
         const currentBinding = bindings.get(key) ?? binding;
         const command = await handleChatCommand({
@@ -194,7 +238,7 @@ export function createPipeline(deps) {
             channel: channelId,
             event,
             bindingKey: key,
-            user: resolved.user,
+            user: commandUser,
             binding: currentBinding,
             selfLink: config.selfLink,
             ...(group === undefined ? {} : { group }),
@@ -212,8 +256,8 @@ export function createPipeline(deps) {
         // Step 6 — the album merge: a group's events become ONE
         // submission when the window closes; a plain event is its own.
         const envelopeText = buildEnvelope(event, {
-            group: false,
-            senderLabel: event.sender.name ?? event.sender.id,
+            group: group !== undefined,
+            senderLabel,
         });
         const batch = albums.add(key, event, envelopeText);
         if (batch === undefined) {
@@ -221,11 +265,11 @@ export function createPipeline(deps) {
             // platform redelivery of a held sibling is a no-op) and arm
             // the close timer that submits the merged batch.
             await seen.commit(`${key}:${event.messageId}`, now());
-            scheduleAlbumClose(channelId, key, event, resolved.user, conversationId, config);
+            scheduleAlbumClose(channelId, key, event, user, conversationId, config);
             return { outcome: "admitted" };
         }
         // Step 10 — submit.
-        return await submit(channelId, event, key, conversationId, resolved.user, batch, config);
+        return await submit(channelId, event, key, conversationId, user, batch, config);
     }
     /** Step 5's unknown-DM branch: the channel's `dm` policy (§8.2). */
     async function unknownDm(channelId, event, config) {
