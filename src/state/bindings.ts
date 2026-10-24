@@ -72,10 +72,13 @@ export class BindingStore {
 
 	/** The live binding for `key`, or undefined when unbound. */
 	get(key: string): Binding | undefined {
-		// Read the file synchronously per call: the engine may hold TWO
-		// store instances over one file (the pipeline writes, the settled
-		// fan-out reads) — a construction-time mirror would go stale across
-		// instances, and the reads are cheap local JSON.
+		// Read the file synchronously per call. ONE instance is threaded
+		// engine-wide now, so a construction-time mirror COULD suffice — but
+		// the reads are cheap local JSON and the per-call read keeps the
+		// store honest against EXTERNAL writers (a crash-recovery e2e or an
+		// operator repairing bindings.json between calls) and against any
+		// future second instance. The mirror was REMOVED precisely because
+		// it went stale across instances; readSync is the fix that stays.
 		return toBinding(this.file.readSync().bindings[key]);
 	}
 

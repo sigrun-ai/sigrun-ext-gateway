@@ -119,6 +119,52 @@ describe("splitMarkdown (limit 40)", () => {
 		}
 	});
 
+	test("a fence opening after a full plain chunk never appends a close to plain text (round-2 fix 1)", () => {
+		// 34 x's + the marker + close cost = 42 > 40: the marker must start a
+		// FRESH chunk, and the plain-text chunk must carry NO fence marker.
+		const text = "x".repeat(34) + "\n```js\nbody\n```";
+		const chunks = splitMarkdown(text, 40);
+		expect(chunks).toHaveLength(2);
+		expect(chunks[0]).toBe("x".repeat(34));
+		expect(chunks[0]).not.toContain("```");
+		expect(chunks[1]).toBe("```js\nbody\n```");
+	});
+
+	test("fence markers never leak into plain-text chunks across the [31,34] band (round-2 fix 1)", () => {
+		// For every length in the band where the marker + close no longer
+		// fits, the split must keep the markers on the FENCE chunk only.
+		for (let xs = 31; xs <= 34; xs++) {
+			const text = "x".repeat(xs) + "\n```js\nbody\n```";
+			const chunks = splitMarkdown(text, 40);
+			for (const chunk of chunks) {
+				expect(chunk.length).toBeLessThanOrEqual(40);
+			}
+			// Plain-text chunks carry NO fence marker at all.
+			for (const chunk of chunks.filter((c) => c.startsWith("x"))) {
+				expect(chunk).toBe("x".repeat(xs));
+			}
+			// The fence chunk is well-formed (opens and closes).
+			const fenceChunk = chunks.find((c) => c.includes("```"));
+			expect(fenceChunk?.startsWith("```js")).toBe(true);
+			expect(fenceChunk?.endsWith("```")).toBe(true);
+		}
+	});
+
+	test("a bare fence never emits an unclosed lone marker chunk (round-2 fix 2)", () => {
+		const text = "```\n" + "z".repeat(60) + "\n" + "y".repeat(60) + "\n```";
+		const chunks = splitMarkdown(text, 40);
+		expect(chunks.length).toBeGreaterThan(1);
+		for (const chunk of chunks) {
+			expect(chunk.length).toBeLessThanOrEqual(40);
+			// A BARE unclosed marker is the one forbidden shape: exactly "```".
+			expect(chunk).not.toBe("```");
+			// Every chunk's fence markers are PAIRED (an even count, and any
+			// marker-only chunk carries its close).
+			const markers = chunk.match(/```/g) ?? [];
+			expect(markers.length % 2).toBe(0);
+		}
+	});
+
 	test("a blank line INSIDE a fenced block splits with close + reopen of the info string", () => {
 		// The fence branch must handle the paragraph break: the chunk after
 		// the mid-fence blank line reopens with the info string.

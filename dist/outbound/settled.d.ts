@@ -34,14 +34,18 @@ export declare const NO_TEXT_REPLY = "(no text reply)";
 /** The pinned abort notice (spec §8.6: "An abort from /stop produces Stopped."). */
 export declare const STOPPED = "Stopped.";
 /**
- * The streaming hand-off seam (Task 6). `finalize` receives the
- * conversation id and the rendered chunks; it returns TRUE when the
- * stream owned delivery (the finals were already sent/edited). The
- * Task 5 stub returns false. Ownership covers the STREAMED chat (the
- * origin chat) — the rest of the fan-out still enqueues.
+ * The streaming hand-off seam (Task 6). `finalize` answers ONE
+ * question: did the stream own this conversation's origin-chat
+ * delivery? True → the settled path skips the origin chat's finals
+ * (the stream already delivered them); the rest of the fan-out still
+ * enqueues. Chunks are NOT passed here: rendering is channel-shaped
+ * and happens per key inside the fan-out — Task 6's StreamRegistry
+ * owns its own `finalize(conversationId, chunks)` shape at its layer
+ * and answers through this seam (the engine's stub wires the answer
+ * into the fan-out decision).
  */
 export interface Streams {
-    finalize(conversationId: number, chunks: readonly string[]): Promise<boolean>;
+    finalize(conversationId: number): Promise<boolean>;
 }
 /** onRunSettled's injectable dependencies. */
 export interface SettledDeps {

@@ -61,10 +61,10 @@ async function fanOutAnswer(event, deps, conversationId) {
     // are never shown — §8.6).
     const text = answerText(event);
     // The origin-chat streaming hand-off (Task 6's seam), consulted ONCE
-    // per conversation (before the fan-out): when the stream owned
-    // delivery, no finals enqueue for the STREAMED chat — the rest of the
+    // per conversation (before the fan-out): when the stream owned the
+    // ORIGIN chat's delivery, that one key is skipped — the rest of the
     // fan-out still runs (the seam owns one chat, never the whole set).
-    const streamed = await deps.streams.finalize(conversationId, []);
+    const streamed = await deps.streams.finalize(conversationId);
     for (const key of keys) {
         const binding = deps.bindings.get(key);
         if (binding === undefined || binding.dead === true)

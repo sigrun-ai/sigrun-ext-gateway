@@ -53,7 +53,15 @@ export function splitMarkdown(text, limit) {
         if (current.length === 0)
             return;
         let chunk = current.join("\n");
-        if (fenceOpen && !chunk.endsWith("```")) {
+        // A chunk that IS just the fence (re)open marker — bare or with an
+        // info string — is INTERIOR: it was armed as the head of a split
+        // chunk whose body went to the next chunk. endsWith("```") would
+        // mistake it for the input's own close line and emit an UNCLOSED
+        // marker (the lone-``` regression); the close suffix belongs here.
+        const loneMarker = fenceOpen &&
+            /^```[^`]*$/.test(chunk) &&
+            !chunk.includes("\n");
+        if (fenceOpen && (loneMarker || !chunk.endsWith("```"))) {
             // The chunk ends INSIDE a fence: close it so the chunk stands
             // alone (the next chunk reopens).
             chunk += "\n```";
@@ -168,27 +176,32 @@ export function splitMarkdown(text, limit) {
         const fenceMatch = /^```(.*)$/.exec(trimmed);
         if (fenceMatch !== null) {
             if (!fenceOpen) {
-                // Opening a fence: the info string rides the reopen prefix. The
-                // marker line is pushed RAW (the reopen arming in pushLine must
-                // not duplicate it — the marker IS the chunk's fence head).
-                fenceOpen = true;
-                openFence = fenceMatch[1] ?? "";
-                openFence = openFence === "" ? undefined : openFence;
-                const marker = "```" + (openFence === undefined ? "" : openFence);
+                // Opening a fence. The fit decision is made against the
+                // PRE-fence state (fenceOpen still false): flipping it first
+                // would make the overflow flush append a CLOSE suffix to a
+                // plain-text chunk that never opened a fence (the stray-marker
+                // regression). Only when the marker is PLACED does the fence
+                // open.
+                const info = fenceMatch[1] ?? "";
+                const bareInfo = info === "" ? undefined : info;
+                const marker = "```" + (bareInfo === undefined ? "" : bareInfo);
                 const joinCost = current.length === 0 ? 0 : 1;
                 const closeCost = CLOSE_COST;
                 if (currentLength + joinCost + marker.length + closeCost <= limit) {
+                    // The marker fits the current chunk: the fence opens in place.
                     current.push(marker);
                     currentLength += joinCost + marker.length;
                 }
                 else {
-                    // The marker does not fit: close the current chunk; the
-                    // marker starts the fresh one (a chunk-broken fence is still
-                    // well-formed — flush closes what was open, the marker opens).
+                    // The marker does not fit: flush the plain-text chunk AS
+                    // PLAIN TEXT (no fence is open — no close suffix), then open
+                    // the fence at the head of the fresh chunk.
                     flush();
                     current.push(marker);
                     currentLength = marker.length;
                 }
+                fenceOpen = true;
+                openFence = bareInfo;
                 continue;
             }
             // Closing a fence: when the current chunk is empty (or holds only

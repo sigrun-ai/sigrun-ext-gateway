@@ -54,14 +54,18 @@ type UnansweredEvent = RunSettledEvent & {
 };
 
 /**
- * The streaming hand-off seam (Task 6). `finalize` receives the
- * conversation id and the rendered chunks; it returns TRUE when the
- * stream owned delivery (the finals were already sent/edited). The
- * Task 5 stub returns false. Ownership covers the STREAMED chat (the
- * origin chat) — the rest of the fan-out still enqueues.
+ * The streaming hand-off seam (Task 6). `finalize` answers ONE
+ * question: did the stream own this conversation's origin-chat
+ * delivery? True → the settled path skips the origin chat's finals
+ * (the stream already delivered them); the rest of the fan-out still
+ * enqueues. Chunks are NOT passed here: rendering is channel-shaped
+ * and happens per key inside the fan-out — Task 6's StreamRegistry
+ * owns its own `finalize(conversationId, chunks)` shape at its layer
+ * and answers through this seam (the engine's stub wires the answer
+ * into the fan-out decision).
  */
 export interface Streams {
-	finalize(conversationId: number, chunks: readonly string[]): Promise<boolean>;
+	finalize(conversationId: number): Promise<boolean>;
 }
 
 /** onRunSettled's injectable dependencies. */
@@ -129,10 +133,10 @@ async function fanOutAnswer(
 	// are never shown — §8.6).
 	const text = answerText(event);
 	// The origin-chat streaming hand-off (Task 6's seam), consulted ONCE
-	// per conversation (before the fan-out): when the stream owned
-	// delivery, no finals enqueue for the STREAMED chat — the rest of the
+	// per conversation (before the fan-out): when the stream owned the
+	// ORIGIN chat's delivery, that one key is skipped — the rest of the
 	// fan-out still runs (the seam owns one chat, never the whole set).
-	const streamed = await deps.streams.finalize(conversationId, []);
+	const streamed = await deps.streams.finalize(conversationId);
 	for (const key of keys) {
 		const binding = deps.bindings.get(key);
 		if (binding === undefined || binding.dead === true) continue;

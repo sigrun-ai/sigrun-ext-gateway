@@ -46,10 +46,7 @@ import { LoopGuard } from "./access/loop-guard.js";
 import { ButtonTokens } from "./inbound/tokens.js";
 import type { PairDeps } from "./commands/pair.js";
 import { createLinkCommand } from "./commands/link.js";
-import {
-	BindingStore,
-	bindingKey,
-} from "./state/bindings.js";
+import { BindingStore } from "./state/bindings.js";
 import { IdentityStore } from "./state/identities.js";
 import { Ledger } from "./state/ledger.js";
 import { DeliveryWorker } from "./outbound/delivery.js";
@@ -171,10 +168,11 @@ export function createEngine(
 	// One delivery worker per supervised channel, keyed channel id
 	// (built at start — a worker owns its channel's timers).
 	const workers = new Map<string, DeliveryWorker>();
-	// The engine-wide binding view over the SAME bindings.json the
-	// pipelines write (each pipeline owns its own store instance over
-	// the shared file — JsonFile's serialized updates keep them
-	// consistent; the settled fan-out reads through THIS one).
+	// The ONE binding store: every pipeline (threaded through
+	// PipelineDeps.bindings), the settled fan-out and the delivery
+	// workers share THIS instance — JsonFile's write serialization is
+	// PER INSTANCE, so a second store over the same file would interleave
+	// its writes with this one's and lose updates.
 	const bindings = new BindingStore(join(gatewayDir, "bindings.json"), {
 		now: timers.now,
 	});
