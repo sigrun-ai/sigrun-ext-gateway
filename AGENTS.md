@@ -18,12 +18,21 @@ cross-extension coupling. sigrun's fourth BUILT-IN
 
 - `src/index.ts` — the factory (`createGateway(host)` →
   `{ extension, gateway }`) + the public re-exports.
-- `src/engine.ts` — the engine (start/stopIntake/stop/health skeleton
-  now; supervision/inbound/delivery land per task).
+- `src/engine.ts` — engine lifecycle, supervision, inbound/outbound
+  wiring, health, and shared dependency seams. Shutdown closes intake,
+  drains delivery for at most 10 s, bounds adapter stop at 5 s, and
+  releases preview watches; the durable ledger keeps leftovers.
 - `src/config.ts` — `parseGatewayConfig`/`readConfig` (live config,
-  `{failed}` isolation per channel/group).
-- `src/state/` — engine state files (`json-file.ts`: serialized atomic
-  0600 JSON).
+  `{failed}` isolation per channel/group; channel enablement is
+  restart-required).
+- `src/inbound/` — dedupe, identity/access, albums, media, pipeline,
+  native formatting, and preview stream registry.
+- `src/outbound/` — settled fan-out, streaming, durable delivery worker,
+  markdown/render/chunking.
+- `src/access/`, `src/commands/` — pairing/link codes, loop guard, and
+  the shared command implementations.
+- `src/state/` — bindings, identities, seen ids, ledger, and
+  `json-file.ts` (serialized atomic 0600 JSON).
 - `src/log.ts` — `hashId` + the scoped logger.
 - `test/fake-host.ts` — the in-memory `SigrunHost` (every member the
   engine uses; `fake.calls`, `fake.setClaimed`, `fake.pushView`).

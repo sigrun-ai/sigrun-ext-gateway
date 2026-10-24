@@ -26,6 +26,7 @@ import type { GatewayEngine, SigrunHost } from "@sigrun/sigrun/extension";
 import { type EngineLog } from "./log.js";
 import { type ChannelStatus } from "./supervisor.js";
 import type { PairDeps } from "./commands/pair.js";
+import { Ledger } from "./state/ledger.js";
 import type { AccessState } from "./inbound/pipeline.js";
 import type { StatusPairingRow } from "./status-route.js";
 import type { ToolDeps } from "./tools.js";
@@ -52,6 +53,8 @@ export interface EngineDeps {
      * tests inject a stub for the pre-ledger engine tests.
      */
     readonly failedRecently?: () => number;
+    /** Test/task-internal ledger seam for shutdown and recovery tests. */
+    readonly deliveryLedger?: Ledger;
     /** Test seam for the receipt wait; production keeps the pinned 30 s. */
     readonly toolReceiptWaitMs?: number;
 }

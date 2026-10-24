@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.0] - 2026-10-23
 ### Added
+- Channel supervision with retry/backoff, adapter status and pairing
+  health surfaces, and bounded ordered shutdown.
+- The live inbound pipeline: dedupe, allowlist/pairing/self-link access,
+  DM and group routing, albums, media uploads, and chat commands.
+- Durable final delivery with access re-checks, retry classification,
+  crash recovery, home notifications, and one-shot job targets.
+- Live response previews through adapter editing, typing fallback,
+  authoritative final hand-off, and preview cleanup at shutdown.
+- `send_message` and `list_chats` agent tools and the bound-chat prompt
+  section.
+- User-deletion cleanup for gateway identity links and home chats.
+- Operator guide covering configuration, pairing, groups, jobs, and
+  disabling the engine or one channel.
 - Repository scaffold from the sigrun-ext-codemode shape (host modules as
   `peerDependencies` mirrored in `devDependencies`; `@sigrun/sigrun` and
   `@sigrun/shared` as `file:` devDependencies; manifest hygiene check

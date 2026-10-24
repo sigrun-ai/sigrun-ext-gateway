@@ -59,6 +59,25 @@ function defaultTimers() {
 }
 /** The unhealthy-dwell threshold (ms) before health degrades (§8.12). */
 const DEGRADED_AFTER_MS = 300_000;
+/** Await an operation only until its shutdown budget expires. */
+async function bounded(operation, ms, onTimeout) {
+    let timer;
+    try {
+        await Promise.race([
+            operation,
+            new Promise((resolve) => {
+                timer = setTimeout(() => {
+                    onTimeout();
+                    resolve();
+                }, ms);
+            }),
+        ]);
+    }
+    finally {
+        if (timer !== undefined)
+            clearTimeout(timer);
+    }
+}
 /** One static (never-supervised) status row. */
 function staticRow(state, detail, since) {
     return {
@@ -84,7 +103,7 @@ export function createEngine(host, deps = {}) {
     // rule holds). Restart recovery runs at `start` (the boot's one
     // recovery point) — a `recoverAfterRestart()` BEFORE any worker runs
     // re-arms `attempting` entries with the recovered flag.
-    const ledger = new Ledger(join(gatewayDir, "ledger.json"), {
+    const ledger = deps.deliveryLedger ?? new Ledger(join(gatewayDir, "ledger.json"), {
         now: timers.now,
         log,
     });
@@ -115,6 +134,10 @@ export function createEngine(host, deps = {}) {
     // channel's in-flight albums).
     const pipelines = [];
     let started = false;
+    let intakeStopped = false;
+    // Per-channel abort ownership lets stop() signal adapters even when an
+    // embedder does not abort the engine's start signal itself.
+    const channelAborters = new Map();
     // The engine-wide access state (Task 4): ONE pairing queue, link-code
     // table, token table and loop guard shared by every channel pipeline
     // and the pair/link commands. Built over the engine's state dir at
@@ -180,6 +203,10 @@ export function createEngine(host, deps = {}) {
             // events until its next restart).
             receive: async (event) => {
                 try {
+                    if (intakeStopped) {
+                        supervisorOf().countDropped();
+                        return { outcome: "dropped" };
+                    }
                     const config = await readConfig(host);
                     const block = config.channels[id];
                     if (block === undefined || "failed" in block) {
@@ -208,6 +235,8 @@ export function createEngine(host, deps = {}) {
             // unknown channel block drops like an event would.
             action: async (event) => {
                 try {
+                    if (intakeStopped)
+                        return;
                     const config = await readConfig(host);
                     const block = config.channels[id];
                     if (block === undefined || "failed" in block)
@@ -437,8 +466,16 @@ export function createEngine(host, deps = {}) {
                 });
                 workers.set(id, worker);
                 // The first attempt settles before start resolves (running
-                // or backoff — a failing adapter never wedges boot).
-                await supervisor.start(ctx.signal);
+                // or backoff — a failing adapter never wedges boot). The engine
+                // owns a per-channel signal so stop() aborts adapters directly;
+                // the host's start signal is bridged for the normal core order.
+                const abort = new AbortController();
+                channelAborters.set(id, abort);
+                if (ctx.signal.aborted)
+                    abort.abort();
+                else
+                    ctx.signal.addEventListener("abort", () => abort.abort(), { once: true });
+                await supervisor.start(abort.signal);
                 // Native menus publish AFTER the adapter start attempt so a
                 // hanging setCommands cannot block supervision. Publication is
                 // bounded and best-effort; there is no retry on later reconnects.
@@ -478,35 +515,55 @@ export function createEngine(host, deps = {}) {
             const pending = [...pipelines];
             pipelines.length = 0;
             await Promise.all(pending.map((pipeline) => pipeline.flushAlbums()));
+            // Close only after the album flush: those events already committed
+            // their dedupe ids and must be admitted before new intake is refused.
+            intakeStopped = true;
         },
         stop: async () => {
-            // A run that never settled (or an intake error) may still own a
-            // watch/timer; shutdown releases every preview before adapters stop.
-            streams.abandonAll();
-            // The adapters stop only once every settle has been delivered
-            // (the ordering); a stop-before-start resolves (the lazy-start
-            // shutdown edge in the handle's contract). The delivery workers
-            // drain FIRST — a bounded window (30 s) for the pending entries,
-            // then a hard stop (retry timers cancel; undelivered entries stay
-            // pending for the next boot's recovery).
+            // A stop-before-start resolves (the lazy-start shutdown edge).
+            // Delivery drains share one 10 s budget across channels. A hung
+            // adapter send cannot extend it; its entry remains pending or
+            // attempting in the durable ledger for restart recovery.
             const draining = [...workers.values()];
             workers.clear();
-            const deadline = timers.now() + 30_000;
+            const deadline = timers.now() + 10_000;
             await Promise.all(draining.map(async (worker) => {
-                await worker.drain(deadline).catch((error) => {
-                    // A drain failure never blocks the stop: the entries stay
-                    // queued (the ledger is the source of truth), but its
-                    // failure remains visible to the operator.
+                try {
+                    await bounded(worker.drain(deadline), 10_000, () => log.warn("delivery drain exceeded 10000 ms — abandoning the wait"));
+                }
+                catch (error) {
                     log.error("delivery drain failed", error);
-                });
-                await worker.stop();
+                }
+                finally {
+                    // stop() cancels retry timers synchronously, then joins the
+                    // in-flight send. That join may never settle; the 10 s
+                    // drain bound above is the only wait shutdown owns.
+                    void worker.stop().catch((error) => {
+                        log.error("delivery worker stop failed", error);
+                    });
+                }
             }));
+            for (const abort of channelAborters.values())
+                abort.abort();
+            channelAborters.clear();
             const pending = [...supervisors.values()];
             supervisors.clear();
-            await Promise.all(pending.map((supervisor) => supervisor.stop()));
-            if (started) {
+            await Promise.all(pending.map(async (supervisor) => {
+                try {
+                    await bounded(supervisor.stop(), 5_000, () => {
+                        log.warn(`channel "${supervisor.id}" stop exceeded 5000 ms — abandoning the wait`);
+                    });
+                }
+                catch (error) {
+                    log.error(`channel "${supervisor.id}" stop failed`, error);
+                }
+            }));
+            // Live previews are not durable delivery. Release their watches
+            // after adapter stop; settled previews finalized during the drain
+            // have already released theirs.
+            streams.abandonAll();
+            if (started)
                 log.info("stopped");
-            }
         },
         health: () => {
             // §8.12: degraded when any enabled, configured channel has been

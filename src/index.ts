@@ -79,6 +79,11 @@ export default function createGateway(host: SigrunHost): SigrunExtensionResult {
 		// unlike the host bridge, it resolves in harness-only embedders
 		// without a 30 s wait.
 		runSettled: (event, api, context) => engine.settle(event, api, context),
+		// Task 12 owns links as well as homes; Task 13 moves links to core's
+		// account table and narrows this cleanup to the home-chat records.
+		userDeleted: async ({ user }) => {
+			await engine.accessState().identities.unlinkUser(user);
+		},
 		// Home-chat notifications share the delivery ledger and workers;
 		// this wrapper kicks delivery after each bounded enqueue.
 		notifiers: [engine.notifier()],
