@@ -31,6 +31,8 @@ import { createStatusRoute } from "./status-route.js";
 import { runPair } from "./commands/pair.js";
 import { createLinkCommand } from "./commands/link.js";
 import { readConfig } from "./config.js";
+import { createGatewayTools } from "./tools.js";
+import { createChannelSection } from "./section.js";
 
 /**
  * The sigrun extension-package factory: builds the engine over the host.
@@ -65,7 +67,11 @@ export default function createGateway(host: SigrunHost): SigrunExtensionResult {
 		now: Date.now,
 	});
 	return {
-		extension: defineExtension({ name: "gateway" }),
+		extension: defineExtension({
+			name: "gateway",
+			tools: createGatewayTools(engine.toolDeps()),
+			sections: [createChannelSection(engine.sectionDeps())],
+		}),
 		gateway: engine,
 		// The settled-run fan-out (§8.6): boot registers this on the event
 		// bus — one call per settled run, which enqueues the finals and
@@ -91,6 +97,12 @@ export default function createGateway(host: SigrunHost): SigrunExtensionResult {
 }
 
 export { createEngine } from "./engine.js";
+export { collectAttachments, TOO_LARGE_NOTE, VOICE_NOTE, ATTACHMENT_FAILED_NOTE } from "./inbound/media.js";
+export type { MediaDeps, CollectedAttachments } from "./inbound/media.js";
+export { createGatewayTools, RECEIPT_WAIT_MS } from "./tools.js";
+export type { ToolDeps } from "./tools.js";
+export { createChannelSection } from "./section.js";
+export type { ChannelSectionDeps } from "./section.js";
 export type { EngineDeps, EngineInternals } from "./engine.js";
 export { splitMarkdown, stripMarkdown } from "./outbound/markdown.js";
 export { renderChunks } from "./outbound/render.js";

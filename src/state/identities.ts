@@ -152,6 +152,21 @@ export class IdentityStore {
 		}));
 	}
 
+	/** Install an absent home without an await, preserving admission order.
+	 * The durable write is queued behind this synchronous in-memory update. */
+	ensureHome(user: string, channel: string, chat: ChatRef): Promise<void> {
+		if (this.homes[user]?.[channel] !== undefined) return Promise.resolve();
+		const perChannel = this.homes[user] ?? {};
+		perChannel[channel] = { chat };
+		this.homes[user] = perChannel;
+		return this.file.update((draft) => {
+			if (draft.homes[user]?.[channel] !== undefined) return;
+			const stored = draft.homes[user] ?? {};
+			stored[channel] = { chat };
+			draft.homes[user] = stored;
+		}).then(() => undefined);
+	}
+
 	/** Set (move) the user's home chat on `channel`. */
 	async setHome(user: string, channel: string, chat: ChatRef): Promise<void> {
 		await this.file.update((draft) => {

@@ -27,6 +27,12 @@ import type { SigrunHost, SigrunExtensionResult } from "@sigrun/sigrun/extension
  */
 export default function createGateway(host: SigrunHost): SigrunExtensionResult;
 export { createEngine } from "./engine.js";
+export { collectAttachments, TOO_LARGE_NOTE, VOICE_NOTE, ATTACHMENT_FAILED_NOTE } from "./inbound/media.js";
+export type { MediaDeps, CollectedAttachments } from "./inbound/media.js";
+export { createGatewayTools, RECEIPT_WAIT_MS } from "./tools.js";
+export type { ToolDeps } from "./tools.js";
+export { createChannelSection } from "./section.js";
+export type { ChannelSectionDeps } from "./section.js";
 export type { EngineDeps, EngineInternals } from "./engine.js";
 export { splitMarkdown, stripMarkdown } from "./outbound/markdown.js";
 export { renderChunks } from "./outbound/render.js";

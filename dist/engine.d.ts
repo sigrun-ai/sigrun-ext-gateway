@@ -28,6 +28,8 @@ import { type ChannelStatus } from "./supervisor.js";
 import type { PairDeps } from "./commands/pair.js";
 import type { AccessState } from "./inbound/pipeline.js";
 import type { StatusPairingRow } from "./status-route.js";
+import type { ToolDeps } from "./tools.js";
+import type { ChannelSectionDeps } from "./section.js";
 /**
  * The engine's injectable dependencies (tests and later tasks). Task 1
  * carried only the log; every later seam lands here so the constructor
@@ -50,6 +52,8 @@ export interface EngineDeps {
      * tests inject a stub for the pre-ledger engine tests.
      */
     readonly failedRecently?: () => number;
+    /** Test seam for the receipt wait; production keeps the pinned 30 s. */
+    readonly toolReceiptWaitMs?: number;
 }
 /** The task-internal surface over the contract four (see the module doc). */
 export interface EngineInternals {
@@ -84,6 +88,9 @@ export interface EngineInternals {
     settle(event: import("@sigrun/sigrun/extension").RunSettledEvent, api: import("@sigrun/sigrun/extension").MemoryEventApi, context: import("@sigrun/sigrun/extension").HandlerContext): Promise<void>;
     /** The home-chat notifier and its enqueue-then-kick delivery path. */
     notifier(): import("@sigrun/sigrun/extension").NotifierContribution;
+    /** Agent tools and bound-chat prompt section over the same shared stores. */
+    toolDeps(): ToolDeps;
+    sectionDeps(): ChannelSectionDeps;
 }
 /**
  * Build the engine over the host. The factory wires the real

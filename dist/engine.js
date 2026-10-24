@@ -42,6 +42,7 @@ import { createNotifier } from "./notify.js";
 import { SessionMetaDoc } from "./session-meta.js";
 import { StreamRegistry } from "./outbound/stream.js";
 import { hashId } from "./log.js";
+import { collectAttachments } from "./inbound/media.js";
 /** The engine's own timer defaults (the real world). */
 function defaultTimers() {
     return {
@@ -158,7 +159,16 @@ export function createEngine(host, deps = {}) {
             // workers share this exact instance (see its declaration).
             bindings,
             streams,
-            channelOf: (channelId) => channels.find((entry) => entry.channel.id === channelId)?.channel,
+            channelOf,
+            stages: {
+                attachments: async (event) => {
+                    const binding = bindings.get(`${id}:default:${event.chat.chatType}:${event.chat.chatId}${event.chat.threadId === undefined ? "" : `:${event.chat.threadId}`}`);
+                    if (binding === undefined)
+                        return { parts: [], notes: [] };
+                    const config = await readConfig(host);
+                    return await collectAttachments({ host, log: channelLog }, binding.conversationId, event.attachments ?? [], config.media.maxBytes, _signal);
+                },
+            },
         });
         pipelines.push(receivePipeline);
         return {
@@ -270,6 +280,7 @@ export function createEngine(host, deps = {}) {
         for (const worker of workers.values())
             worker.kick();
     };
+    const channelOf = (id) => channels.find((entry) => entry.channel.id === id)?.channel;
     const ctxLog = (scope) => ({
         info: (msg) => log.info(`[${scope}] ${msg}`),
         warn: (msg) => log.warn(`[${scope}] ${msg}`),
@@ -308,6 +319,25 @@ export function createEngine(host, deps = {}) {
             channelOf: (id) => channels.find((entry) => entry.channel.id === id)?.channel,
             log,
             now: timers.now,
+        }),
+        toolDeps: () => ({
+            host,
+            bindings,
+            identities: access.identities,
+            ledger,
+            channelOf,
+            readConfig: () => readConfig(host),
+            log,
+            kick: kickWorkers,
+            ...(deps.toolReceiptWaitMs === undefined
+                ? {}
+                : { receiptWaitMs: deps.toolReceiptWaitMs }),
+        }),
+        sectionDeps: () => ({
+            host,
+            bindings,
+            channelOf,
+            readConfig: () => readConfig(host),
         }),
         notifier: () => {
             const notifier = createNotifier(notifyDeps());

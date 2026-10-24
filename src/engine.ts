@@ -58,6 +58,9 @@ import { StreamRegistry } from "./outbound/stream.js";
 import type { AccessState } from "./inbound/pipeline.js";
 import type { StatusPairingRow } from "./status-route.js";
 import { hashId } from "./log.js";
+import { collectAttachments } from "./inbound/media.js";
+import type { ToolDeps } from "./tools.js";
+import type { ChannelSectionDeps } from "./section.js";
 
 /**
  * The engine's injectable dependencies (tests and later tasks). Task 1
@@ -81,6 +84,8 @@ export interface EngineDeps {
 	 * tests inject a stub for the pre-ledger engine tests.
 	 */
 	readonly failedRecently?: () => number;
+	/** Test seam for the receipt wait; production keeps the pinned 30 s. */
+	readonly toolReceiptWaitMs?: number;
 }
 
 /** The task-internal surface over the contract four (see the module doc). */
@@ -118,6 +123,9 @@ export interface EngineInternals {
 	): Promise<void>;
 	/** The home-chat notifier and its enqueue-then-kick delivery path. */
 	notifier(): import("@sigrun/sigrun/extension").NotifierContribution;
+	/** Agent tools and bound-chat prompt section over the same shared stores. */
+	toolDeps(): ToolDeps;
+	sectionDeps(): ChannelSectionDeps;
 }
 
 /** The engine's own timer defaults (the real world). */
@@ -265,8 +273,23 @@ export function createEngine(
 			// workers share this exact instance (see its declaration).
 			bindings,
 			streams,
-			channelOf: (channelId) =>
-				channels.find((entry) => entry.channel.id === channelId)?.channel,
+			channelOf,
+			stages: {
+				attachments: async (event) => {
+					const binding = bindings.get(
+						`${id}:default:${event.chat.chatType}:${event.chat.chatId}${event.chat.threadId === undefined ? "" : `:${event.chat.threadId}`}`,
+					);
+					if (binding === undefined) return { parts: [], notes: [] };
+					const config = await readConfig(host);
+					return await collectAttachments(
+						{ host, log: channelLog },
+						binding.conversationId,
+						event.attachments ?? [],
+						config.media.maxBytes,
+						_signal,
+					);
+				},
+			},
 		});
 		pipelines.push(receivePipeline);
 		return {
@@ -382,6 +405,8 @@ export function createEngine(
 	const kickWorkers = (): void => {
 		for (const worker of workers.values()) worker.kick();
 	};
+	const channelOf = (id: string): ChannelContribution | undefined =>
+		channels.find((entry) => entry.channel.id === id)?.channel;
 
 	const ctxLog = (scope: string): EngineLog => ({
 		info: (msg) => log.info(`[${scope}] ${msg}`),
@@ -427,6 +452,25 @@ export function createEngine(
 				channels.find((entry) => entry.channel.id === id)?.channel,
 			log,
 			now: timers.now,
+		}),
+		toolDeps: (): ToolDeps => ({
+			host,
+			bindings,
+			identities: access.identities,
+			ledger,
+			channelOf,
+			readConfig: () => readConfig(host),
+			log,
+			kick: kickWorkers,
+			...(deps.toolReceiptWaitMs === undefined
+				? {}
+				: { receiptWaitMs: deps.toolReceiptWaitMs }),
+		}),
+		sectionDeps: (): ChannelSectionDeps => ({
+			host,
+			bindings,
+			channelOf,
+			readConfig: () => readConfig(host),
 		}),
 		notifier: () => {
 			const notifier = createNotifier(notifyDeps());

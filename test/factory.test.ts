@@ -31,6 +31,13 @@ describe("createGateway (the factory)", () => {
 		const host = await fakeHost();
 		const result = await createGateway(host);
 		expect(result.extension?.name).toBe("gateway");
+		expect(result.extension?.tools?.map((tool) => tool.name)).toEqual([
+			"send_message",
+			"list_chats",
+		]);
+		expect(result.extension?.sections?.map((section) => section.key)).toEqual([
+			"gateway-channel",
+		]);
 		expect(typeof result.gateway?.start).toBe("function");
 		expect(typeof result.gateway?.stopIntake).toBe("function");
 		expect(typeof result.gateway?.stop).toBe("function");

@@ -178,6 +178,19 @@ export function createPipeline(deps) {
             user = resolved.user;
             commandUser = user;
             owner = user;
+            // An allowlisted identity has no link row to seed the home DM.
+            // Record this DM as the channel home when none exists so tools
+            // and notices have the same target as linked identities.
+            if (access.identities.homesOf(user).every((home) => home.channel !== channelId)) {
+                // Keep admission ordered, especially for album siblings: only
+                // the first writer installs the home; no async write here.
+                // Album siblings can race this first-home write; keep the
+                // synchronous check/update ordering and await durability.
+                void access.identities.ensureHome(user, channelId, event.chat)
+                    .catch((error) => {
+                    deps.log.error("home chat persistence failed", error);
+                });
+            }
         }
         // The bound conversation, or a fresh one for an unbound chat.
         const binding = bindings.get(key);
@@ -353,12 +366,15 @@ export function createPipeline(deps) {
     /** Step 10: the submit + the M12 error outcomes. */
     async function submit(channelId, event, key, conversationId, user, batch, config) {
         const text = batch.join("\n");
-        const parts = [
-            ...(deps.stages?.attachments === undefined
-                ? []
-                : await deps.stages.attachments(event)),
-            { type: "text", text },
+        const media = deps.stages?.attachments === undefined
+            ? { parts: [], notes: [] }
+            : await deps.stages.attachments(event);
+        // A media-only event submits its notes, not an empty text block.
+        const textParts = [
+            ...(text === "" ? [] : [{ type: "text", text }]),
+            ...media.notes.map((note) => ({ type: "text", text: note })),
         ];
+        const parts = [...media.parts, ...textParts];
         const opts = {
             user,
             requestId: `${key}:${event.messageId}`,

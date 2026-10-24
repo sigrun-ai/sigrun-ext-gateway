@@ -25,7 +25,7 @@
  * text). A failed notice send is logged, never thrown: the submit
  * error already resolved the event's fate.
  */
-import type { ActionEvent, ChannelContribution, InboundEvent, SigrunHost, SubmissionInputPart } from "@sigrun/sigrun/extension";
+import type { ActionEvent, ChannelContribution, InboundEvent, SigrunHost } from "@sigrun/sigrun/extension";
 import type { SubmissionId } from "@earendil-works/pi-durable";
 import type { ChannelConfig } from "../config.js";
 import type { EngineLog } from "../log.js";
@@ -69,7 +69,7 @@ export interface PipelineStages {
     /** Step 8 (interaction text answers): consumed-or-continue, as above. */
     readonly interactionAnswer?: (channelId: string, event: InboundEvent) => Promise<PipelineOutcome | undefined>;
     /** Step 9 (attachments): render the event's media into submit parts. */
-    readonly attachments?: (event: InboundEvent) => Promise<readonly SubmissionInputPart[]>;
+    readonly attachments?: (event: InboundEvent) => Promise<import("./media.js").CollectedAttachments>;
 }
 /** The pipeline's injectable dependencies. */
 export interface PipelineDeps {
