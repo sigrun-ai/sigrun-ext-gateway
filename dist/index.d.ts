@@ -28,6 +28,14 @@ import type { SigrunHost, SigrunExtensionResult } from "@sigrun/sigrun/extension
 export default function createGateway(host: SigrunHost): SigrunExtensionResult;
 export { createEngine } from "./engine.js";
 export type { EngineDeps, EngineInternals } from "./engine.js";
+export { splitMarkdown, stripMarkdown } from "./outbound/markdown.js";
+export { renderChunks } from "./outbound/render.js";
+export type { SerializedOutbound, LedgerEntry, LedgerInput, LedgerKind, LedgerState } from "./state/ledger.js";
+export { Ledger, PRUNE_AFTER_MS } from "./state/ledger.js";
+export { DeliveryWorker, RESENT_MARKER } from "./outbound/delivery.js";
+export type { DeliveryDeps } from "./outbound/delivery.js";
+export { onRunSettled, NO_TEXT_REPLY, STOPPED } from "./outbound/settled.js";
+export type { SettledDeps, Streams } from "./outbound/settled.js";
 export { Supervisor } from "./supervisor.js";
 export type { ChannelState, ChannelStatus, StatusSink, SupervisorDeps, } from "./supervisor.js";
 export { createStatusRoute } from "./status-route.js";

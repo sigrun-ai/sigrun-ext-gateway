@@ -34,19 +34,23 @@ export class BindingStore {
             bindings: {},
         }));
         this.now = opts.now ?? Date.now;
-        // The mirror loads SYNCHRONOUSLY at construction: a second instance
-        // over the same file (the restart path) must observe the persisted
-        // bindings from its first `get` — the constructor cannot await.
-        // The queue is empty at construction, so nothing can interleave.
-        for (const [key, row] of Object.entries(this.file.readSync().bindings)) {
-            this.mirror.set(key, row);
-        }
     }
     /** The live binding for `key`, or undefined when unbound. */
     get(key) {
-        // The synchronous mirror is authoritative (loaded at construction,
-        // refreshed inside every queued mutation — see {@link mirror}).
-        return toBinding(this.mirror.get(key));
+        // Read the file synchronously per call: the engine may hold TWO
+        // store instances over one file (the pipeline writes, the settled
+        // fan-out reads) — a construction-time mirror would go stale across
+        // instances, and the reads are cheap local JSON.
+        return toBinding(this.file.readSync().bindings[key]);
+    }
+    /** Every live key bound to `conversationId` (the delivery fan-out read). */
+    keysOf(conversationId) {
+        const keys = [];
+        for (const [key, row] of Object.entries(this.file.readSync().bindings)) {
+            if (row.conversationId === conversationId)
+                keys.push(key);
+        }
+        return keys;
     }
     /** Bind `key` to `conversationId`, recording any prior binding in `previous`. */
     async bind(key, conversationId, chat) {
@@ -72,24 +76,13 @@ export class BindingStore {
                     ...(prior.dead === undefined ? {} : { dead: prior.dead }),
                 };
             }
-            this.mirror.set(key, draft.bindings[key]);
         });
     }
     /** Remove the binding entirely (the access-revoked path). */
     async unbind(key) {
         await this.file.update((draft) => {
             delete draft.bindings[key];
-            this.mirror.delete(key);
         });
-    }
-    /** Every live key bound to `conversationId` (the delivery fan-out read). */
-    keysOf(conversationId) {
-        const keys = [];
-        for (const [key, row] of this.mirror) {
-            if (row.conversationId === conversationId)
-                keys.push(key);
-        }
-        return keys;
     }
     /** Mark the binding dead (`chat_gone` delivery): kept, never delivered to. */
     async markDead(key) {
@@ -98,7 +91,6 @@ export class BindingStore {
             if (row === undefined)
                 return;
             draft.bindings[key] = { ...row, dead: true };
-            this.mirror.set(key, draft.bindings[key]);
         });
     }
     /** Clear the dead flag (a new inbound event proves the chat alive). */
@@ -109,14 +101,8 @@ export class BindingStore {
                 return;
             const { dead: _dead, ...rest } = row;
             draft.bindings[key] = rest;
-            this.mirror.set(key, rest);
         });
     }
-    /**
-     * The synchronous mirror of the file's bindings: loaded at
-     * construction (readSync), refreshed inside every queued mutation.
-     */
-    mirror = new Map();
 }
 /** Narrow a stored row to the public binding shape. */
 function toBinding(row) {

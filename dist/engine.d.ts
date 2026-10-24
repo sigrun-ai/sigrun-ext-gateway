@@ -10,8 +10,8 @@
  * adapter — the engine records a static row instead), then hands every
  * enabled channel a {@link Supervisor}. Health (§8.12) reads the
  * supervisors' unhealthy dwell plus the ledger's failed-in-last-hour
- * count (the ledger lands in Task 5; until then the count reads 0
- * through the `failedRecently` dependency).
+ * count (Task 5: the engine-owned ledger feeds the `failedRecently`
+ * seam — tests may still override it).
  *
  * The inbound pipeline (Task 3) drives `receive` (§8.4): the config
  * block is read LIVE per event, admission runs the ordered steps, and
@@ -46,7 +46,8 @@ export interface EngineDeps {
     };
     /**
      * The ledger's failed-in-last-hour count (§8.12's second health
-     * input). The ledger lands in Task 5; the default reads 0.
+     * input). Default: the engine's OWN ledger over the real clock —
+     * tests inject a stub for the pre-ledger engine tests.
      */
     readonly failedRecently?: () => number;
 }
@@ -75,6 +76,12 @@ export interface EngineInternals {
     /** The `/pair` decision deps over the shared state (the factory's
      *  command closes over these — `host` is the factory's own host). */
     pairDeps(host: SigrunHost): PairDeps;
+    /**
+     * The settled-run fan-out (the factory's `runSettled` closes over
+     * this): enqueues the finals/notices, then kicks the affected
+     * channels' workers.
+     */
+    settle(event: import("@sigrun/sigrun/extension").RunSettledEvent): Promise<void>;
 }
 /**
  * Build the engine over the host. The factory wires the real

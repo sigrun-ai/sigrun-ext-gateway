@@ -40,19 +40,14 @@ export declare class BindingStore {
     });
     /** The live binding for `key`, or undefined when unbound. */
     get(key: string): Binding | undefined;
+    /** Every live key bound to `conversationId` (the delivery fan-out read). */
+    keysOf(conversationId: number): readonly string[];
     /** Bind `key` to `conversationId`, recording any prior binding in `previous`. */
     bind(key: string, conversationId: number, chat: ChatRef): Promise<void>;
     /** Remove the binding entirely (the access-revoked path). */
     unbind(key: string): Promise<void>;
-    /** Every live key bound to `conversationId` (the delivery fan-out read). */
-    keysOf(conversationId: number): readonly string[];
     /** Mark the binding dead (`chat_gone` delivery): kept, never delivered to. */
     markDead(key: string): Promise<void>;
     /** Clear the dead flag (a new inbound event proves the chat alive). */
     clearDead(key: string): Promise<void>;
-    /**
-     * The synchronous mirror of the file's bindings: loaded at
-     * construction (readSync), refreshed inside every queued mutation.
-     */
-    private readonly mirror;
 }

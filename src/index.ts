@@ -67,6 +67,12 @@ export default function createGateway(host: SigrunHost): SigrunExtensionResult {
 	return {
 		extension: defineExtension({ name: "gateway" }),
 		gateway: engine,
+		// The settled-run fan-out (§8.6): boot registers this on the event
+		// bus — one call per settled run, which enqueues the finals and
+		// kicks the workers. The `api` (the narrowed conversation read)
+		// and the context are unused here: the fan-out reads the answer
+		// from the event itself.
+		runSettled: (event) => engine.settle(event),
 		// The admin status route (§8.12): mounts at /v1/ext/gateway/status,
 		// admin-gated by core's route mounting (the handler renders the
 		// engine's read; `pairing` rows carry the hashed sender id, never
@@ -83,6 +89,14 @@ export default function createGateway(host: SigrunHost): SigrunExtensionResult {
 
 export { createEngine } from "./engine.js";
 export type { EngineDeps, EngineInternals } from "./engine.js";
+export { splitMarkdown, stripMarkdown } from "./outbound/markdown.js";
+export { renderChunks } from "./outbound/render.js";
+export type { SerializedOutbound, LedgerEntry, LedgerInput, LedgerKind, LedgerState } from "./state/ledger.js";
+export { Ledger, PRUNE_AFTER_MS } from "./state/ledger.js";
+export { DeliveryWorker, RESENT_MARKER } from "./outbound/delivery.js";
+export type { DeliveryDeps } from "./outbound/delivery.js";
+export { onRunSettled, NO_TEXT_REPLY, STOPPED } from "./outbound/settled.js";
+export type { SettledDeps, Streams } from "./outbound/settled.js";
 export { Supervisor } from "./supervisor.js";
 export type {
 	ChannelState,

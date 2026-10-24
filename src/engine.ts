@@ -10,8 +10,8 @@
  * adapter — the engine records a static row instead), then hands every
  * enabled channel a {@link Supervisor}. Health (§8.12) reads the
  * supervisors' unhealthy dwell plus the ledger's failed-in-last-hour
- * count (the ledger lands in Task 5; until then the count reads 0
- * through the `failedRecently` dependency).
+ * count (Task 5: the engine-owned ledger feeds the `failedRecently`
+ * seam — tests may still override it).
  *
  * The inbound pipeline (Task 3) drives `receive` (§8.4): the config
  * block is read LIVE per event, admission runs the ordered steps, and
@@ -46,7 +46,14 @@ import { LoopGuard } from "./access/loop-guard.js";
 import { ButtonTokens } from "./inbound/tokens.js";
 import type { PairDeps } from "./commands/pair.js";
 import { createLinkCommand } from "./commands/link.js";
+import {
+	BindingStore,
+	bindingKey,
+} from "./state/bindings.js";
 import { IdentityStore } from "./state/identities.js";
+import { Ledger } from "./state/ledger.js";
+import { DeliveryWorker } from "./outbound/delivery.js";
+import { onRunSettled, type SettledDeps, type Streams } from "./outbound/settled.js";
 import type { AccessState } from "./inbound/pipeline.js";
 import type { StatusPairingRow } from "./status-route.js";
 import { hashId } from "./log.js";
@@ -69,7 +76,8 @@ export interface EngineDeps {
 	};
 	/**
 	 * The ledger's failed-in-last-hour count (§8.12's second health
-	 * input). The ledger lands in Task 5; the default reads 0.
+	 * input). Default: the engine's OWN ledger over the real clock —
+	 * tests inject a stub for the pre-ledger engine tests.
 	 */
 	readonly failedRecently?: () => number;
 }
@@ -97,6 +105,12 @@ export interface EngineInternals {
 	/** The `/pair` decision deps over the shared state (the factory's
 	 *  command closes over these — `host` is the factory's own host). */
 	pairDeps(host: SigrunHost): PairDeps;
+	/**
+	 * The settled-run fan-out (the factory's `runSettled` closes over
+	 * this): enqueues the finals/notices, then kicks the affected
+	 * channels' workers.
+	 */
+	settle(event: import("@sigrun/sigrun/extension").RunSettledEvent): Promise<void>;
 }
 
 /** The engine's own timer defaults (the real world). */
@@ -142,9 +156,31 @@ export function createEngine(
 ): GatewayEngine & EngineInternals {
 	const log = deps.log ?? createLog("engine");
 	const timers = deps.timers ?? defaultTimers();
-	const failedRecently = deps.failedRecently ?? (() => 0);
 	const stateDir = host.stores.paths.state;
 	const gatewayDir = join(stateDir, "gateway");
+	// The delivery ledger (Task 5): engine-wide (every channel's worker
+	// pulls its own queue from it), built over the state dir at factory
+	// time — the stores load synchronously, no timers (the pi lifecycle
+	// rule holds). Restart recovery runs at `start` (the boot's one
+	// recovery point) — a `recoverAfterRestart()` BEFORE any worker runs
+	// re-arms `attempting` entries with the recovered flag.
+	const ledger = new Ledger(join(gatewayDir, "ledger.json"), {
+		now: timers.now,
+		log,
+	});
+	// One delivery worker per supervised channel, keyed channel id
+	// (built at start — a worker owns its channel's timers).
+	const workers = new Map<string, DeliveryWorker>();
+	// The engine-wide binding view over the SAME bindings.json the
+	// pipelines write (each pipeline owns its own store instance over
+	// the shared file — JsonFile's serialized updates keep them
+	// consistent; the settled fan-out reads through THIS one).
+	const bindings = new BindingStore(join(gatewayDir, "bindings.json"), {
+		now: timers.now,
+	});
+	const failedRecently =
+		deps.failedRecently ??
+		(() => ledger.failedSince(timers.now() - 3_600_000));
 	let channels: readonly {
 		extension: string;
 		channel: ChannelContribution;
@@ -275,6 +311,31 @@ export function createEngine(
 			log: channelLog,
 		};
 	};
+	/** The settled-run fan-out deps (the factory's `runSettled` closes over
+	 *  these — the same stores the pipelines and commands share, plus the
+	 *  delivery ledger and the Task 6 streaming stub). */
+	const settledDeps = (): SettledDeps => ({
+		host,
+		bindings,
+		identities: access.identities,
+		ledger,
+		channelOf: (id: string) =>
+			channels.find((entry) => entry.channel.id === id)?.channel,
+		configOf: async (id: string) => {
+			const config = await readConfig(host);
+			const block = config.channels[id];
+			return block === undefined || "failed" in block ? undefined : block;
+		},
+		origins,
+		streams: streamsStub,
+		log,
+	});
+	// The Task 6 streaming seam's stub (false — no stream owns delivery
+	// yet; Task 6 replaces this closure with the StreamRegistry).
+	const streamsStub: Streams = {
+		finalize: async () => false,
+	};
+
 	const ctxLog = (scope: string): EngineLog => ({
 		info: (msg) => log.info(`[${scope}] ${msg}`),
 		warn: (msg) => log.warn(`[${scope}] ${msg}`),
@@ -320,6 +381,20 @@ export function createEngine(
 			log,
 			now: timers.now,
 		}),
+		settle: async (
+			event: import("@sigrun/sigrun/extension").RunSettledEvent,
+		): Promise<void> => {
+			// The fan-out runs over the engine's deps, then every LIVE
+			// worker kicks (an entry for an unsupervised channel parks in
+			// the ledger — the channel's next start drains it). The prune
+			// rides settles too: a long-lived engine prunes without owning
+			// a recurring timer.
+			await onRunSettled(event, settledDeps());
+			await ledger.prune(timers.now()).catch((error: unknown) => {
+				log.error("ledger prune failed", error);
+			});
+			for (const worker of workers.values()) worker.kick();
+		},
 		start: async (ctx: GatewayEngineContext): Promise<void> => {
 			// ONE start per engine instance (the handle's lazy `started`
 			// already guards re-reads; this guards a direct second call).
@@ -327,6 +402,16 @@ export function createEngine(
 			started = true;
 			channels = ctx.channels;
 			await mkdir(gatewayDir, { recursive: true });
+			// Ledger restart recovery runs BEFORE any worker (§8.6): every
+			// `attempting` entry re-arms `pending` with the recovered flag,
+			// and the workers resend them with the marker line. The prune of
+			// delivered entries past 7 days rides the same point (plus every
+			// settle — no recurring timer: the supervisor tests count the
+			// engine's scheduled timers, and an idle engine owns ZERO).
+			await ledger.recoverAfterRestart();
+			await ledger.prune(timers.now()).catch((error: unknown) => {
+				log.error("ledger prune failed", error);
+			});
 			// Enablement is restart-required (spec §8.1): read ONCE at start.
 			const config = await readConfig(host);
 			log.info(
@@ -384,6 +469,21 @@ export function createEngine(
 					log: createLog(`channel:${id}`),
 				});
 				supervisors.set(id, supervisor);
+				// The channel's delivery worker (Task 5): one in-flight send,
+				// the pinned retry ladder, the ledger's queue. Built BEFORE the
+				// supervisor starts (its first delivery may kick immediately —
+				// recovery entries ride the same loop).
+				const worker = new DeliveryWorker(entry.channel, ledger, {
+					bindings,
+					timeoutMs: 60_000,
+					delays: [1_000, 5_000, 30_000],
+					setTimer: timers.setTimer,
+					now: timers.now,
+					log: createLog(`channel:${id}`),
+				});
+				workers.set(id, worker);
+				// Recovered/pending entries from a prior boot flow NOW.
+				worker.kick();
 				// The first attempt settles before start resolves (running
 				// or backoff — a failing adapter never wedges boot).
 				await supervisor.start(ctx.signal);
@@ -406,7 +506,22 @@ export function createEngine(
 		stop: async (): Promise<void> => {
 			// The adapters stop only once every settle has been delivered
 			// (the ordering); a stop-before-start resolves (the lazy-start
-			// shutdown edge in the handle's contract).
+			// shutdown edge in the handle's contract). The delivery workers
+			// drain FIRST — a bounded window (30 s) for the pending entries,
+			// then a hard stop (retry timers cancel; undelivered entries stay
+			// pending for the next boot's recovery).
+			const draining = [...workers.values()];
+			workers.clear();
+			const deadline = timers.now() + 30_000;
+			await Promise.all(
+				draining.map(async (worker) => {
+					await worker.drain(deadline).catch(() => {
+						// A drain failure never blocks the stop: the entries stay
+					// queued (the ledger is the source of truth).
+				});
+				await worker.stop();
+			}),
+			);
 			const pending = [...supervisors.values()];
 			supervisors.clear();
 			await Promise.all(pending.map((supervisor) => supervisor.stop()));
