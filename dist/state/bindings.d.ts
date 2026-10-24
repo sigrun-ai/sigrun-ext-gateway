@@ -40,6 +40,8 @@ export declare class BindingStore {
     });
     /** The live binding for `key`, or undefined when unbound. */
     get(key: string): Binding | undefined;
+    /** One file read's binding rows, keyed for target authorization. */
+    entries(): Readonly<Record<string, Binding>>;
     /** Every live binding key (target authorization and chat enumeration). */
     allKeys(): readonly string[];
     /** Every live key bound to `conversationId` (the delivery fan-out read). */

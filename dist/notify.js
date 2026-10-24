@@ -20,6 +20,7 @@ export function createNotifier(deps) {
     };
 }
 async function notify(event, deps) {
+    // Task 9 owns chat presentation for interaction records.
     if (event.type === "interaction.pending")
         return;
     if (event.user === undefined)
@@ -33,6 +34,13 @@ async function notify(event, deps) {
         // The settled fan-out owns bound conversations; a second notice
         // here would duplicate the answer the chat just received.
         if (deps.bindings.keysOf(event.conversationId).length > 0)
+            return;
+        const meta = await deps.host.conversations.meta(event.conversationId);
+        // New-conversation jobs are unbound, but their delivery and
+        // job.failed paths own notices. Core's run.settled carries no
+        // outcome, so the false success notice on a failed job run needs
+        // a core-contract event change and is ledgered for final review.
+        if (meta.jobId !== undefined)
             return;
     }
     const text = event.type === "run.settled"

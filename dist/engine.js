@@ -256,9 +256,7 @@ export function createEngine(host, deps = {}) {
         // The event bus's narrowed snapshot API works in harness-only
         // embedders; host.conversations.meta would wait for a server
         // bridge that those embedders never create.
-        readMeta: api === undefined || context === undefined
-            ? undefined
-            : async (conversationId) => await api.document(SessionMetaDoc, conversationId, context),
+        readMeta: async (conversationId) => await api.document(SessionMetaDoc, conversationId, context),
     });
     const notifyDeps = () => ({
         host,

@@ -202,6 +202,21 @@ describe("Ledger failedSince and prune", () => {
 		expect(ledger.failedSince(5000)).toBe(0);
 	});
 
+	test("an old delivered job tag survives pruning; an old non-job tag does not", async () => {
+		const path = join(await tempDir(), "ledger.json");
+		const now = 1000;
+		const ledger = new Ledger(path, { now: () => now });
+		const job = await ledger.enqueue(input({ tag: "job:7:loop:100000001:0" }));
+		await ledger.mark(job!.id, "delivered");
+		const ordinary = await ledger.enqueue(input({ tag: "final:7:9:loop" }));
+		await ledger.mark(ordinary!.id, "delivered");
+		await ledger.prune(now + 604_800_001);
+		const reloaded = new Ledger(path, { now: () => now });
+		expect(reloaded.list().map((entry) => entry.tag)).toEqual([
+			"job:7:loop:100000001:0",
+		]);
+	});
+
 	test("delivered entries are pruned after 7 days; failed and pending stay", async () => {
 		const path = join(await tempDir(), "ledger.json");
 		let now = 1000;

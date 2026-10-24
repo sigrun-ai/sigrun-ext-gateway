@@ -19,6 +19,7 @@ export async function resolveTargets(deps, owner, targets) {
     const resolved = [];
     const rejected = [];
     const homes = deps.identities.homesOf(owner);
+    const bindings = deps.bindings.entries();
     for (const target of targets) {
         const parsed = parseTarget(target);
         if (parsed === undefined) {
@@ -39,7 +40,11 @@ export async function resolveTargets(deps, owner, targets) {
             resolved.push({ channel: parsed.channel, chat: home.chat });
             continue;
         }
-        const binding = findChatBinding(deps.bindings, parsed.channel, parsed.chatId);
+        const binding = findChatBinding(bindings, parsed.channel, parsed.chatId);
+        if (binding?.dead === true) {
+            rejected.push({ target, reason: "chat is gone" });
+            continue;
+        }
         const meta = binding === undefined
             ? undefined
             : await deps.host.conversations.meta(binding.conversationId);
@@ -57,10 +62,9 @@ export async function resolveTargets(deps, owner, targets) {
 /** Find a chat without guessing its thread id or group/DM type. */
 function findChatBinding(bindings, channel, chatId) {
     const prefix = `${channel}:default:`;
-    for (const key of bindings.allKeys()) {
+    for (const [key, binding] of Object.entries(bindings)) {
         if (!key.startsWith(prefix))
             continue;
-        const binding = bindings.get(key);
         if (binding?.chat.chatId === chatId)
             return binding;
     }

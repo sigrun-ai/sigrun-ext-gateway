@@ -7,7 +7,7 @@
 
 import type { ChatRef, SigrunHost } from "@sigrun/sigrun/extension";
 import type { ConversationId } from "@earendil-works/pi-durable";
-import type { BindingStore } from "./state/bindings.js";
+import type { Binding, BindingStore } from "./state/bindings.js";
 import type { IdentityStore } from "./state/identities.js";
 
 const CHANNEL_PATTERN = /^[a-z][a-z0-9-]*$/;
@@ -56,6 +56,7 @@ export async function resolveTargets(
 	const resolved: ResolvedTarget[] = [];
 	const rejected: RejectedTarget[] = [];
 	const homes = deps.identities.homesOf(owner);
+	const bindings = deps.bindings.entries();
 	for (const target of targets) {
 		const parsed = parseTarget(target);
 		if (parsed === undefined) {
@@ -75,7 +76,11 @@ export async function resolveTargets(
 			resolved.push({ channel: parsed.channel, chat: home.chat });
 			continue;
 		}
-		const binding = findChatBinding(deps.bindings, parsed.channel, parsed.chatId);
+		const binding = findChatBinding(bindings, parsed.channel, parsed.chatId);
+		if (binding?.dead === true) {
+			rejected.push({ target, reason: "chat is gone" });
+			continue;
+		}
 		const meta = binding === undefined
 			? undefined
 			: await deps.host.conversations.meta(binding.conversationId as ConversationId);
@@ -96,14 +101,13 @@ export async function resolveTargets(
 
 /** Find a chat without guessing its thread id or group/DM type. */
 function findChatBinding(
-	bindings: BindingStore,
+	bindings: Readonly<Record<string, Binding>>,
 	channel: string,
 	chatId: string,
 ): ReturnType<BindingStore["get"]> {
 	const prefix = `${channel}:default:`;
-	for (const key of bindings.allKeys()) {
+	for (const [key, binding] of Object.entries(bindings)) {
 		if (!key.startsWith(prefix)) continue;
-		const binding = bindings.get(key);
 		if (binding?.chat.chatId === chatId) return binding;
 	}
 	return undefined;

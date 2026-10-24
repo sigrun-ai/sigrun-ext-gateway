@@ -9,6 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
 import type { NotificationEvent } from "@sigrun/sigrun/extension";
+import type { ConversationId } from "@earendil-works/pi-durable";
+import type { SessionMeta } from "@sigrun/shared/views";
 import { createNotifier, type NotifyDeps } from "../src/notify.js";
 import { BindingStore, bindingKey } from "../src/state/bindings.js";
 import { IdentityStore } from "../src/state/identities.js";
@@ -93,6 +95,21 @@ describe("home-chat notifier", () => {
 			chat: { chatId: "100000001", chatType: "dm" },
 			text: "Reply ready — Nightly report\nhttps://sigrun.example.invalid/#/c/7",
 		});
+	});
+
+	test("a job-run settle does not duplicate its delivery with Reply ready", async () => {
+		const { host, ledger, deps } = await rig();
+		const id = await host.conversations.create({ owner: "alice", name: "Nightly report" });
+		const meta = await host.conversations.meta(id);
+		(host.metas as Map<ConversationId, SessionMeta>).set(id, {
+			...meta,
+			jobId: "api:nightly",
+			deliver: ["loop"],
+		});
+		await createNotifier(deps).notify(settled({ conversationId: id as number }), {
+			host: deps.host,
+		});
+		expect(ledger.nextPending("loop")).toBeUndefined();
 	});
 
 	test("a later run in the same unbound conversation gets its own notice", async () => {

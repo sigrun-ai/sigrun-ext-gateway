@@ -136,10 +136,11 @@ export declare class Ledger {
      *  NOW still degrades health. */
     failedSince(ts: number): number;
     /**
-     * Prune DELIVERED entries older than `PRUNE_AFTER_MS` (7 days). Failed
-     * and pending entries are never pruned — a failed entry is the health
-     * signal (§8.6: "nothing is dropped silently"), a pending entry is
-     * undelivered work.
+     * Prune DELIVERED entries older than `PRUNE_AFTER_MS` (7 days), except
+     * job tags: those are the permanent one-shot delivery record, so age
+     * must never re-enable delivery. Failed and pending entries are never
+     * pruned — a failed entry is the health signal (§8.6: "nothing is
+     * dropped silently"), a pending entry is undelivered work.
      */
     prune(now: number): Promise<void>;
     /**

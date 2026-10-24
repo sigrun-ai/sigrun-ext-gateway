@@ -69,9 +69,9 @@ export default function createGateway(host: SigrunHost): SigrunExtensionResult {
 		gateway: engine,
 		// The settled-run fan-out (§8.6): boot registers this on the event
 		// bus — one call per settled run, which enqueues the finals and
-		// kicks the workers. The `api` (the narrowed conversation read)
-		// and the context are unused here: the fan-out reads the answer
-		// from the event itself.
+		// kicks the workers. The narrowed document read is mandatory:
+		// unlike the host bridge, it resolves in harness-only embedders
+		// without a 30 s wait.
 		runSettled: (event, api, context) => engine.settle(event, api, context),
 		// Home-chat notifications share the delivery ledger and workers;
 		// this wrapper kicks delivery after each bounded enqueue.

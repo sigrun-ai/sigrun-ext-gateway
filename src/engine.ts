@@ -113,8 +113,8 @@ export interface EngineInternals {
 	 */
 	settle(
 		event: import("@sigrun/sigrun/extension").RunSettledEvent,
-		api?: import("@sigrun/sigrun/extension").MemoryEventApi,
-		context?: import("@sigrun/sigrun/extension").HandlerContext,
+		api: import("@sigrun/sigrun/extension").MemoryEventApi,
+		context: import("@sigrun/sigrun/extension").HandlerContext,
 	): Promise<void>;
 	/** The home-chat notifier and its enqueue-then-kick delivery path. */
 	notifier(): import("@sigrun/sigrun/extension").NotifierContribution;
@@ -344,8 +344,8 @@ export function createEngine(
 	 *  these — the same stores the pipelines and commands share, plus the
 	 *  delivery ledger and the stream registry). */
 	const settledDeps = (
-		api?: import("@sigrun/sigrun/extension").MemoryEventApi,
-		context?: import("@sigrun/sigrun/extension").HandlerContext,
+		api: import("@sigrun/sigrun/extension").MemoryEventApi,
+		context: import("@sigrun/sigrun/extension").HandlerContext,
 	): SettledDeps => ({
 		host,
 		bindings,
@@ -364,13 +364,11 @@ export function createEngine(
 		// The event bus's narrowed snapshot API works in harness-only
 		// embedders; host.conversations.meta would wait for a server
 		// bridge that those embedders never create.
-		readMeta: api === undefined || context === undefined
-			? undefined
-			: async (conversationId) => await api.document(
-				SessionMetaDoc,
-				conversationId as import("@earendil-works/pi-durable").ConversationId,
-				context,
-			),
+		readMeta: async (conversationId) => await api.document(
+			SessionMetaDoc,
+			conversationId as import("@earendil-works/pi-durable").ConversationId,
+			context,
+		),
 	});
 
 	const notifyDeps = (): NotifyDeps => ({
@@ -442,8 +440,8 @@ export function createEngine(
 		},
 		settle: async (
 			event: import("@sigrun/sigrun/extension").RunSettledEvent,
-			api?: import("@sigrun/sigrun/extension").MemoryEventApi,
-			context?: import("@sigrun/sigrun/extension").HandlerContext,
+			api: import("@sigrun/sigrun/extension").MemoryEventApi,
+			context: import("@sigrun/sigrun/extension").HandlerContext,
 		): Promise<void> => {
 			// The fan-out runs over the engine's deps, then every LIVE
 			// worker kicks (an entry for an unsupervised channel parks in

@@ -2,6 +2,7 @@
  * The core session-meta document token, re-declared structurally from
  * the shared wire type. Standalone doc tokens compare by kind/scope;
  * declaring it here avoids a runtime import of core's server modules.
+ * Core-contract follow-up: version drift here silently reads job meta as absent.
  */
 
 import { defineDoc } from "@earendil-works/pi-durable";

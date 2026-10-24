@@ -82,6 +82,16 @@ export class BindingStore {
 		return toBinding(this.file.readSync().bindings[key]);
 	}
 
+	/** One file read's binding rows, keyed for target authorization. */
+	entries(): Readonly<Record<string, Binding>> {
+		return Object.fromEntries(
+			Object.entries(this.file.readSync().bindings).map(([key, row]) => [
+				key,
+				toBinding(row)!,
+			]),
+		);
+	}
+
 	/** Every live binding key (target authorization and chat enumeration). */
 	allKeys(): readonly string[] {
 		return Object.keys(this.file.readSync().bindings);

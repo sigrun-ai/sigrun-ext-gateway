@@ -44,7 +44,7 @@ export class Ledger {
     }
     /** A snapshot of the entries (dedupe and status reads). */
     list() {
-        return this.entries;
+        return [...this.entries];
     }
     /**
      * Enqueue one entry (state `pending`, stamped id/createdAt). Returns
@@ -133,15 +133,17 @@ export class Ledger {
             (entry.stateSince ?? entry.createdAt) >= ts).length;
     }
     /**
-     * Prune DELIVERED entries older than `PRUNE_AFTER_MS` (7 days). Failed
-     * and pending entries are never pruned — a failed entry is the health
-     * signal (§8.6: "nothing is dropped silently"), a pending entry is
-     * undelivered work.
+     * Prune DELIVERED entries older than `PRUNE_AFTER_MS` (7 days), except
+     * job tags: those are the permanent one-shot delivery record, so age
+     * must never re-enable delivery. Failed and pending entries are never
+     * pruned — a failed entry is the health signal (§8.6: "nothing is
+     * dropped silently"), a pending entry is undelivered work.
      */
     async prune(now) {
         const pruned = await this.file.update((draft) => {
             const before = draft.entries.length;
             const kept = draft.entries.filter((entry) => entry.state !== "delivered" ||
+                entry.tag?.startsWith("job:") === true ||
                 now - entry.createdAt < PRUNE_AFTER_MS);
             // In-place array replacement keeps the draft object identity.
             draft.entries.length = 0;
