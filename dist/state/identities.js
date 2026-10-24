@@ -68,6 +68,15 @@ export class IdentityStore {
             }
         }).then((state) => this.reload(state));
     }
+    /**
+     * The stored link's user for `senderId` on `channel` (the LINK alone,
+     * never the allowlist): the pairing/self-link conflict guards read
+     * this — a sender already linked to a DIFFERENT user must refuse,
+     * never silently re-point (§8.2).
+     */
+    linkedUserOf(channel, senderId) {
+        return this.links[linkKey(channel, senderId)]?.user;
+    }
     /** Remove every link and home chat of `user` (the userDeleted path). */
     async unlinkUser(user) {
         await this.file.update((draft) => {

@@ -13,8 +13,8 @@
  *   never silently reset by the next write (the sigrun stores contract).
  */
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { chmod, mkdir, readFile, rename, rm, writeFile, } from "node:fs/promises";
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, } from "node:fs";
 import { dirname } from "node:path";
 /** A serialized JSON state file at `path`. */
 export class JsonFile {
@@ -68,6 +68,20 @@ export class JsonFile {
             return draft;
         });
     }
+    /**
+     * The SYNCHRONOUS read-modify-write, mirroring {@link readSync}'s
+     * contract for stores whose mutation API is synchronous by interface
+     * (the pairing queue: `request` returns its verdict immediately, so
+     * the durable write must land before the verdict — a crash between
+     * them would silently lose a pending request). The queue is bypassed
+     * (the callers own the ordering: sync mutations cannot interleave).
+     */
+    updateSync(mutate) {
+        const draft = this.readSync();
+        mutate(draft);
+        this.writeNowSync(draft);
+        return draft;
+    }
     /** Run `work` after every earlier queued operation (the serialization). */
     enqueue(work) {
         const next = this.queue.then(work, work);
@@ -117,6 +131,25 @@ export class JsonFile {
                 // Best-effort cleanup of the staged temp; the failure being
                 // handled is the original one.
             });
+            throw error;
+        }
+    }
+    /**
+     * The sync twin of {@link writeNow}: the SAME atomic staging (temp +
+     * rename, 0600 before the swap) through the blocking fs calls.
+     */
+    writeNowSync(value) {
+        mkdirSync(dirname(this.path), { recursive: true });
+        const temp = `${this.path}.${randomUUID()}.tmp`;
+        try {
+            writeFileSync(temp, `${JSON.stringify(value, null, "\t")}\n`, {
+                mode: 0o600,
+            });
+            chmodSync(temp, 0o600);
+            renameSync(temp, this.path);
+        }
+        catch (error) {
+            rmSync(temp, { force: true });
             throw error;
         }
     }

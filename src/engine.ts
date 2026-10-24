@@ -40,6 +40,16 @@ import {
 	type ChannelState,
 	type ChannelStatus,
 } from "./supervisor.js";
+import { PairingStore } from "./access/pairing.js";
+import { LinkCodes } from "./access/link-codes.js";
+import { LoopGuard } from "./access/loop-guard.js";
+import { ButtonTokens } from "./inbound/tokens.js";
+import type { PairDeps } from "./commands/pair.js";
+import { createLinkCommand } from "./commands/link.js";
+import { IdentityStore } from "./state/identities.js";
+import type { AccessState } from "./inbound/pipeline.js";
+import type { StatusPairingRow } from "./status-route.js";
+import { hashId } from "./log.js";
 
 /**
  * The engine's injectable dependencies (tests and later tasks). Task 1
@@ -76,6 +86,17 @@ export interface EngineInternals {
 	 * supervised and static (config-error/disabled) alike.
 	 */
 	status(): { readonly channels: Readonly<Record<string, ChannelStatus>> };
+	/**
+	 * The status route's pairing read (Task 4): every live pending
+	 * request WITHOUT the code (hashed sender — §8.12's rule that
+	 * operator output never carries raw platform ids).
+	 */
+	pairingStatus(): readonly StatusPairingRow[];
+	/** The engine-wide access state (pipelines and commands share it). */
+	accessState(): AccessState;
+	/** The `/pair` decision deps over the shared state (the factory's
+	 *  command closes over these — `host` is the factory's own host). */
+	pairDeps(host: SigrunHost): PairDeps;
 }
 
 /** The engine's own timer defaults (the real world). */
@@ -144,6 +165,18 @@ export function createEngine(
 	// channel's in-flight albums).
 	const pipelines: import("./inbound/pipeline.js").PipelineHandle[] = [];
 	let started = false;
+	// The engine-wide access state (Task 4): ONE pairing queue, link-code
+	// table, token table and loop guard shared by every channel pipeline
+	// and the pair/link commands. Built over the engine's state dir at
+	// factory time (cheap: the stores load synchronously; no timers, no
+	// I/O beyond the state reads — the pi lifecycle rule holds).
+	const access: AccessState = {
+		identities: new IdentityStore(join(gatewayDir, "identities.json")),
+		pairing: new PairingStore(join(gatewayDir, "pairing.json")),
+		linkCodes: new LinkCodes(),
+		tokens: new ButtonTokens(),
+		loopGuard: new LoopGuard(),
+	};
 
 	// The engine-owned half of every adapter context (Task 3's pipeline
 	// drives `receive`; the supervisor's makeContext seam stays stable).
@@ -183,6 +216,7 @@ export function createEngine(
 			stateDir: gatewayDir,
 			log: channelLog,
 			origins,
+			access,
 		});
 		pipelines.push(receivePipeline);
 		return {
@@ -215,8 +249,22 @@ export function createEngine(
 					throw error;
 				}
 			},
-			// Button taps have no token table until Task 4/9 — swallow.
-			action: async () => {},
+			// Button taps route through the pipeline's token handler (Task
+			// 4: pair decisions; Task 9 adds interactions). A tap on an
+			// unknown channel block drops like an event would.
+			action: async (event) => {
+				try {
+					const config = await readConfig(host);
+					const block = config.channels[id];
+					if (block === undefined || "failed" in block) return;
+					await receivePipeline.action(id, event, block);
+				} catch (error) {
+					// A tap failure never rejects the adapter's ack: the token is
+					// consumed, the decision lost — logged loud, never retried
+					// (a replayed tap is a no-op by the token's single use).
+					channelLog.error("action failed", error);
+				}
+			},
 			status: report,
 			fail: () => {
 				// The supervisor wraps this member (its own fail routes into
@@ -253,6 +301,25 @@ export function createEngine(
 		stateDir: gatewayDir,
 		channelIds: () => channels.map((entry) => entry.channel.id),
 		status,
+		pairingStatus: (): readonly StatusPairingRow[] =>
+			access.pairing.pending().map((row) => ({
+				channel: row.channel,
+				sender: hashId(row.senderId),
+				createdAt: row.createdAt,
+			})),
+		/** The engine-wide access state (the commands and pipelines share). */
+		accessState: (): AccessState => access,
+		/** The `/pair` decision deps over the shared state (the factory's
+		 *  command closes over these). */
+		pairDeps: (hostArg: SigrunHost): PairDeps => ({
+			host: hostArg,
+			identities: access.identities,
+			pairing: access.pairing,
+			channelOf: (id: string) =>
+				channels.find((entry) => entry.channel.id === id)?.channel,
+			log,
+			now: timers.now,
+		}),
 		start: async (ctx: GatewayEngineContext): Promise<void> => {
 			// ONE start per engine instance (the handle's lazy `started`
 			// already guards re-reads; this guards a direct second call).

@@ -4,22 +4,33 @@
  * The sigrun extension-package contract: the default export is a factory
  * DECLARING the host parameter (arity 1 — the host rule; a length-0
  * factory with a defaulted first parameter would consume the host as
- * that dependency), returning `{ extension, gateway }`.
+ * that dependency), returning `{ extension, gateway, routes,
+ * commands }`.
  *
  * The extension is a bare `defineExtension({ name: "gateway" })`:
  * the prompt section (§8.10) and the `send_message`/`list_chats` tools
  * (§8.9) land with the tasks that own them. The `gateway` engine is
  * built over the host at factory time (cheap closure wiring — no
  * timers, no I/O; the pi lifecycle rule: the factory registers
- * handlers only, `start` runs after the server listens) and the
- * admin status route (Task 2, §8.12) renders the engine's status
- * read.
+ * handlers only, `start` runs after the server listens), the admin
+ * status route (Task 2, §8.12) renders the engine's status read, and
+ * the `/pair` + `/link` slash commands (Task 4, §8.2) close over the
+ * SAME engine-wide access state the pipelines use — a webui approval
+ * and a chat-button tap drive the same pairing queue, and an issued
+ * link code redeems in the matching channel's pipeline.
  */
 
 import { defineExtension } from "@earendil-works/pi-durable";
-import type { SigrunHost, SigrunExtensionResult } from "@sigrun/sigrun/extension";
+import type {
+	ExtensionCommandContribution,
+	SigrunHost,
+	SigrunExtensionResult,
+} from "@sigrun/sigrun/extension";
 import { createEngine } from "./engine.js";
 import { createStatusRoute } from "./status-route.js";
+import { runPair } from "./commands/pair.js";
+import { createLinkCommand } from "./commands/link.js";
+import { readConfig } from "./config.js";
 
 /**
  * The sigrun extension-package factory: builds the engine over the host.
@@ -28,16 +39,45 @@ import { createStatusRoute } from "./status-route.js";
  */
 export default function createGateway(host: SigrunHost): SigrunExtensionResult {
 	const engine = createEngine(host);
+	// `/pair` (§8.2): the admin surface over the shared pairing queue.
+	// The invoke route hands the caller's principal (user + EFFECTIVE
+	// admin — the stored flag OR the persisted group grant, C8); an
+	// unnamed loopback caller gets the pinned refusal.
+	const pair: ExtensionCommandContribution = {
+		name: "pair",
+		description: "Manage pending channel pairing requests (admin)",
+		args: "[approve <code> <user> | deny <code>]",
+		run: async (ctx) => ({
+			notice: await runPair(engine.pairDeps(host), ctx.args, {
+				user: ctx.principal.user,
+				admin: ctx.principal.admin,
+			}),
+		}),
+	};
+	// `/link <channel>` (§8.2): issue a single-use self-link code bound
+	// to the invoking user and channel. `knownChannels` reads the ids the
+	// last start recorded — an engine that never started knows none, and
+	// every channel id is unknown (the honest refusal).
+	const link: ExtensionCommandContribution = createLinkCommand({
+		readConfig: () => readConfig(host),
+		linkCodes: engine.accessState().linkCodes,
+		knownChannels: engine.channelIds,
+		now: Date.now,
+	});
 	return {
 		extension: defineExtension({ name: "gateway" }),
 		gateway: engine,
 		// The admin status route (§8.12): mounts at /v1/ext/gateway/status,
 		// admin-gated by core's route mounting (the handler renders the
-		// engine's read; `pairing` ships empty until Task 4).
-		routes: [createStatusRoute(() => ({
-			channels: engine.status().channels,
-			pairing: [],
-		}))],
+		// engine's read; `pairing` rows carry the hashed sender id, never
+		// the code).
+		routes: [
+			createStatusRoute(() => ({
+				channels: engine.status().channels,
+				pairing: engine.pairingStatus(),
+			})),
+		],
+		commands: [pair, link],
 	};
 }
 
@@ -76,6 +116,7 @@ export type { LinkVia, ResolvedUser } from "./state/identities.js";
 export { buildEnvelope } from "./inbound/envelope.js";
 export { createPipeline } from "./inbound/pipeline.js";
 export type {
+	AccessState,
 	PipelineDeps,
 	PipelineOutcome,
 	PipelineStages,
@@ -83,5 +124,20 @@ export type {
 	SubmissionOrigin,
 } from "./inbound/pipeline.js";
 export { AlbumCollector, ALBUM_WINDOW_MS } from "./inbound/albums.js";
+export { ButtonTokens } from "./inbound/tokens.js";
+export type { TokenAction } from "./inbound/tokens.js";
+export { CODE_ALPHABET, newCode, normalizeCode } from "./access/codes.js";
+export { PairingStore, PAIRING_TTL_MS } from "./access/pairing.js";
+export type { PairingRequest, RequestResult } from "./access/pairing.js";
+export { LinkCodes } from "./access/link-codes.js";
+export { LoopGuard } from "./access/loop-guard.js";
+export { runPair } from "./commands/pair.js";
+export type { PairCaller, PairDeps } from "./commands/pair.js";
+export { createLinkCommand, redeemLink } from "./commands/link.js";
+export type {
+	LinkCommand,
+	LinkCommandDeps,
+	LinkDeps,
+} from "./commands/link.js";
 export { createLog, hashId } from "./log.js";
 export type { EngineLog } from "./log.js";

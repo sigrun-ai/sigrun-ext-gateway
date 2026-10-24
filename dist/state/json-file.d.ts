@@ -35,6 +35,15 @@ export declare class JsonFile<T> {
      * state returns. A throwing mutator leaves the file untouched.
      */
     update(mutate: (draft: T) => void | Promise<void>): Promise<T>;
+    /**
+     * The SYNCHRONOUS read-modify-write, mirroring {@link readSync}'s
+     * contract for stores whose mutation API is synchronous by interface
+     * (the pairing queue: `request` returns its verdict immediately, so
+     * the durable write must land before the verdict — a crash between
+     * them would silently lose a pending request). The queue is bypassed
+     * (the callers own the ordering: sync mutations cannot interleave).
+     */
+    updateSync(mutate: (draft: T) => void): T;
     /** Run `work` after every earlier queued operation (the serialization). */
     private enqueue;
     private readNow;
@@ -47,4 +56,9 @@ export declare class JsonFile<T> {
      * deeper path stays usable on a fresh deployment.
      */
     private writeNow;
+    /**
+     * The sync twin of {@link writeNow}: the SAME atomic staging (temp +
+     * rename, 0600 before the swap) through the blocking fs calls.
+     */
+    private writeNowSync;
 }

@@ -25,6 +25,9 @@
 import type { GatewayEngine, SigrunHost } from "@sigrun/sigrun/extension";
 import { type EngineLog } from "./log.js";
 import { type ChannelStatus } from "./supervisor.js";
+import type { PairDeps } from "./commands/pair.js";
+import type { AccessState } from "./inbound/pipeline.js";
+import type { StatusPairingRow } from "./status-route.js";
 /**
  * The engine's injectable dependencies (tests and later tasks). Task 1
  * carried only the log; every later seam lands here so the constructor
@@ -61,6 +64,17 @@ export interface EngineInternals {
     status(): {
         readonly channels: Readonly<Record<string, ChannelStatus>>;
     };
+    /**
+     * The status route's pairing read (Task 4): every live pending
+     * request WITHOUT the code (hashed sender — §8.12's rule that
+     * operator output never carries raw platform ids).
+     */
+    pairingStatus(): readonly StatusPairingRow[];
+    /** The engine-wide access state (pipelines and commands share it). */
+    accessState(): AccessState;
+    /** The `/pair` decision deps over the shared state (the factory's
+     *  command closes over these — `host` is the factory's own host). */
+    pairDeps(host: SigrunHost): PairDeps;
 }
 /**
  * Build the engine over the host. The factory wires the real

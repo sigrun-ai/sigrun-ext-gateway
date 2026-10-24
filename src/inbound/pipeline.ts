@@ -1,11 +1,13 @@
 /**
  * The inbound pipeline (spec §8.4): one `receive` runs the ordered
- * steps. Task 3 implements steps 2 (dedupe), 3 (self/bot drops — the
- * bot loop guard's counting arrives with the group admission task),
- * 5 (allowlist/link DMs only; groups arrive with their own task), 6
- * (album merge) and 10 (submit) plus the M12 submit-error outcomes.
- * Steps 1 (claimed gate), 4 (self-link), 7 (commands), 8 (interaction
- * answers) and 9 (attachments) are INJECTABLE STAGES
+ * steps. Task 3 landed steps 2 (dedupe), 3 (self/bot drops), 6 (album
+ * merge) and 10 (submit) plus the M12 submit-error outcomes; Task 4
+ * fills step 1 (the claimed gate), step 4 (self-link) and step 5 (the
+ * DM access policies) INLINE over the shared {@link AccessState} — the
+ * access stores are engine-wide (one pairing queue, one link-code
+ * table, one token table, one loop guard), so the engine builds the
+ * state and hands it to every channel's pipeline. Steps 7 (commands),
+ * 8 (interaction answers) and 9 (attachments) remain INJECTABLE STAGES
  * (`PipelineDeps.stages`) filled by their own tasks — the design keeps
  * the step ORDER in one place while each task lands its logic.
  *
@@ -26,6 +28,7 @@
 
 import { join } from "node:path";
 import type {
+	ActionEvent,
 	ChannelContribution,
 	ChatRef,
 	InboundEvent,
@@ -45,6 +48,13 @@ import { AlbumCollector, ALBUM_WINDOW_MS } from "./albums.js";
 import { bindingKey, BindingStore } from "../state/bindings.js";
 import { SeenSet } from "../state/seen.js";
 import { IdentityStore } from "../state/identities.js";
+import { PairingStore } from "../access/pairing.js";
+import { LinkCodes } from "../access/link-codes.js";
+import { LoopGuard } from "../access/loop-guard.js";
+import { ButtonTokens } from "./tokens.js";
+import { normalizeCode } from "../access/codes.js";
+import { redeemLink } from "../commands/link.js";
+import { approvePairing, denyPairing } from "../commands/pair.js";
 
 /** A receive's terminal outcome (the adapter acks on any resolution). */
 export type PipelineOutcome =
@@ -61,18 +71,23 @@ export interface SubmissionOrigin {
 	readonly channel: string;
 }
 
-/** The stages later tasks inject (§8.4 steps 1, 4, 7, 8, 9). */
+/**
+ * The engine-wide access state (Task 4): every store the access steps
+ * and the pair/link commands share. The ENGINE builds one and threads
+ * it into every channel pipeline AND the command closures; a pipeline
+ * constructed WITHOUT one builds a private state over its own state
+ * dir (the stand-alone Task 3 shape).
+ */
+export interface AccessState {
+	readonly identities: IdentityStore;
+	readonly pairing: PairingStore;
+	readonly linkCodes: LinkCodes;
+	readonly tokens: ButtonTokens;
+	readonly loopGuard: LoopGuard;
+}
+
+/** The stages later tasks inject (§8.4 steps 7, 8, 9). */
 export interface PipelineStages {
-	/** Step 1 (the claimed gate): true when setup is unclaimed (drop). */
-	readonly claimedGate?: (channelId: string) => boolean;
-	/**
-	 * Step 4 (self-link): handles `/link <code>`. Returns an outcome
-	 * when it consumed the event, undefined to continue the pipeline.
-	 */
-	readonly selfLink?: (
-		channelId: string,
-		event: InboundEvent,
-	) => Promise<PipelineOutcome | undefined>;
 	/**
 	 * Step 7 (commands): handles gateway chat commands (the bound
 	 * conversation id is handed in — commands act on it). Returns an
@@ -104,8 +119,10 @@ export interface PipelineDeps {
 	readonly log: EngineLog;
 	/** submissionId → the origin record (the outbound seam). */
 	readonly origins: Map<SubmissionId, SubmissionOrigin>;
-	/** The injectable stages (§8.4 steps 1, 4, 7, 8, 9). */
+	/** The injectable stages (§8.4 steps 7, 8, 9). */
 	readonly stages?: PipelineStages;
+	/** The engine-wide access state (Task 4). Absent → a private one. */
+	readonly access?: AccessState;
 	/** The clock (tests inject a fake). Default: real. */
 	readonly now?: () => number;
 }
@@ -113,6 +130,16 @@ export interface PipelineDeps {
 /** The pinned UnservedModelError notice (spec §8.4 M12, exact copy). */
 const UNSERVED_MODEL_NOTICE =
 	"The model <ref> is not available. Use /model to pick another.";
+
+/** The pinned group refusal for `/link` (spec §8.2, exact copy). */
+const LINK_GROUP_REFUSAL = "send this in a direct message";
+
+/** One rendered button row. */
+type ButtonRow = readonly {
+	readonly label: string;
+	readonly data: string;
+	readonly style?: "primary" | "danger" | "neutral";
+}[];
 
 /**
  * The engine's per-receive handler: `(channelId, event, config) →
@@ -126,11 +153,12 @@ export type Receive = (
 ) => Promise<PipelineOutcome>;
 
 /**
- * A pipeline's receive, carrying the engine-owned flush handle: ONE
- * pipeline per engine (the state stores are shared across channels; the
- * binding key carries the channel) — the engine wires every supervised
- * channel's `ChannelContext.receive` through the callable and calls
- * `flushAlbums` from its `stopIntake`.
+ * A pipeline's receive, carrying the engine-owned flush handle and the
+ * tap handler: ONE pipeline per engine (the state stores are shared
+ * across channels; the binding key carries the channel) — the engine
+ * wires every supervised channel's `ChannelContext.receive` through
+ * the callable, calls `flushAlbums` from its `stopIntake`, and routes
+ * `ChannelContext.action` through `action`.
  */
 export interface PipelineHandle extends Receive {
 	/**
@@ -139,6 +167,28 @@ export interface PipelineHandle extends Receive {
 	 * ordering: flush, then stop admitting).
 	 */
 	flushAlbums(): Promise<void>;
+	/**
+	 * A button tap (§8.7): resolve the token, guard the tapper (a pair
+	 * decision needs an EFFECTIVE admin — C8), apply the decision.
+	 * Foreign or replayed tokens are ignored; a tap never throws across
+	 * the adapter boundary.
+	 */
+	action(
+		channelId: string,
+		event: ActionEvent,
+		config: ChannelConfig,
+	): Promise<void>;
+}
+
+/** Build a private access state over `stateDir` (the no-`access` shape). */
+function privateAccess(stateDir: string, now: () => number): AccessState {
+	return {
+		identities: new IdentityStore(join(stateDir, "identities.json")),
+		pairing: new PairingStore(join(stateDir, "pairing.json"), { now }),
+		linkCodes: new LinkCodes(),
+		tokens: new ButtonTokens(),
+		loopGuard: new LoopGuard(),
+	};
 }
 
 export function createPipeline(deps: PipelineDeps): PipelineHandle {
@@ -147,10 +197,9 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 		now,
 	});
 	const seen = new SeenSet(join(deps.stateDir, "seen.json"));
-	const identities = new IdentityStore(
-		join(deps.stateDir, "identities.json"),
-		{ log: deps.log },
-	);
+	const access =
+		deps.access ??
+		privateAccess(deps.stateDir, () => now());
 	const albums = new AlbumCollector(now, ALBUM_WINDOW_MS);
 	// Per-group close timers (the album window's flush).
 	const albumTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -177,8 +226,16 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 		const key = bindingKey(channelId, event.chat);
 		const seenId = `${key}:${event.messageId}`;
 
-		// Step 1 — the claimed gate (injected; absent = claimed posture).
-		if (deps.stages?.claimedGate?.(channelId) === true) {
+		// Step 1 — the claimed gate (§8.2): an unclaimed deployment has
+		// no users to act for; every event drops with ONE log line per
+		// channel (the state can flip mid-process — the check is per
+		// event, not cached at start).
+		if ((await deps.host.users.list()).length === 0) {
+			deps.log.once(
+				`unclaimed:${channelId}`,
+				"warn",
+				`setup unclaimed — dropping inbound (channel "${channelId}")`,
+			);
 			return dropped();
 		}
 
@@ -205,32 +262,66 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 		key: string,
 		config: ChannelConfig,
 	): Promise<PipelineOutcome> {
-		// Step 3 — self and bot drops.
+		// Step 3 — self and bot drops. An ADMITTED bot rides the loop
+		// guard (§8.2: 10 per chat per 60000 ms, then a 300000 ms
+		// cooldown) — a chatty integration must never monopolize the run
+		// queue or echo itself into a loop.
 		if (event.fromSelf === true) return dropped();
-		if (event.sender.isBot === true && !config.allowBots) {
-			return dropped();
+		if (event.sender.isBot === true) {
+			if (!config.allowBots) return dropped();
+			if (!access.loopGuard.admit(key, now())) {
+				deps.log.once(
+					`loop-guard:${key}`,
+					"warn",
+					"bot loop guard tripped — bot messages on this chat drop for 5 minutes",
+				);
+				return dropped();
+			}
 		}
 
-		// Step 4 — self-link (`/link <code>`): handled before access.
-		const selfLink = await deps.stages?.selfLink?.(channelId, event);
-		if (selfLink !== undefined) return selfLink;
+		// Step 4 — self-link (`/link <code>`, §8.2): handled BEFORE
+		// access — the code IS the authorization, so the sender may be
+		// unknown here. Only when the channel's `selfLink` is on; a
+		// selfLink-off channel leaves `/link` to the access policy (an
+		// allowlist channel's operator chose a closed list).
+		if (config.selfLink && isLinkCommand(event.text)) {
+			if (event.chat.chatType !== "dm") {
+				// The code was exposed to other members (M9): void it, then
+				// refuse. The refusal is exact (the plan pins the string).
+				access.linkCodes.invalidate(
+					normalizeCode(event.text.replace(/^\/link\s*/, "")),
+				);
+				await sendNotice(event.chat, LINK_GROUP_REFUSAL, undefined);
+				return { outcome: "command" };
+			}
+			const reply = await redeemLink(
+				{
+					identities: access.identities,
+					linkCodes: access.linkCodes,
+					log: deps.log,
+					now,
+				},
+				channelId,
+				event,
+			);
+			await sendNotice(event.chat, reply, undefined);
+			return { outcome: "command" };
+		}
 
-		// Step 5 — access: Task 3 admits DMs only. Groups arrive with
-		// Task 8's admission stage; everything else drops.
+		// Step 5 — access (§8.2). DMs resolve through the allowlist then
+		// links; an unknown DM sender's treatment follows the channel's
+		// `dm` policy. Groups arrive with Task 8's admission stage;
+		// everything else drops.
 		if (event.chat.chatType !== "dm") {
 			return dropped();
 		}
-		const resolved = identities.userFor(config, channelId, event.sender.id);
+		const resolved = access.identities.userFor(
+			config,
+			channelId,
+			event.sender.id,
+		);
 		if (resolved === undefined) {
-			// Unknown DM sender: the pairing reply arrives with Task 4's
-			// pairing stage; the drop (with its once-per-sender log) is
-			// the honest Task 3 posture.
-			deps.log.once(
-				`dm-drop:${channelId}:${event.sender.id}`,
-				"info",
-				`dm from unknown sender dropped (channel "${channelId}")`,
-			);
-			return dropped();
+			return await unknownDm(channelId, event, config);
 		}
 
 		// The bound conversation, or a fresh one for an unbound chat.
@@ -306,6 +397,115 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 		return await submit(channelId, event, key, conversationId, resolved.user, batch, config);
 	}
 
+	/** Step 5's unknown-DM branch: the channel's `dm` policy (§8.2). */
+	async function unknownDm(
+		channelId: string,
+		event: InboundEvent,
+		config: ChannelConfig,
+	): Promise<PipelineOutcome> {
+		if (config.dm === "disabled") {
+			// Silent: no reply, no log (the operator turned DMs off —
+			// a log line per stranger would be noise, not signal).
+			return dropped();
+		}
+		if (config.dm === "allowlist") {
+			// Drop, logged once per sender per day (the day bucket in the
+			// key; a restart re-logs once — the honest per-process bound).
+			const day = Math.floor(now() / 86_400_000);
+			deps.log.once(
+				`dm-drop:${channelId}:${event.sender.id}:${day}`,
+				"warn",
+				`dm from unknown sender dropped (channel "${channelId}")`,
+			);
+			return dropped();
+		}
+		// `pairing`: one request, one reply carrying the code, admin
+		// notices — and the message itself is NEVER submitted, then or
+		// after approval (§8.2).
+		const result = access.pairing.request(
+			channelId,
+			{ id: event.sender.id, name: event.sender.name },
+			event.chat,
+			now(),
+		);
+		if ("limited" in result) {
+			// No reply on a limit (§8.2): a reply would be an oracle for a
+			// probing sender. The drop is logged once per sender.
+			deps.log.once(
+				`pairing-limited:${channelId}:${event.sender.id}`,
+				"info",
+				`pairing request over limit (${result.limited}, channel "${channelId}")`,
+			);
+			return dropped();
+		}
+		await sendNotice(
+			event.chat,
+			`Your pairing code is ${result.code}. An admin will approve it — ` +
+				"until then your messages are not processed.",
+			undefined,
+		);
+		await notifyAdmins(channelId, event, result.code, config);
+		return dropped();
+	}
+
+	/** The pairing notice to every effective admin's home DM (§8.2). */
+	async function notifyAdmins(
+		channelId: string,
+		event: InboundEvent,
+		code: string,
+		config: ChannelConfig,
+	): Promise<void> {
+		void config;
+		const users = await deps.host.users.list();
+		const admins = users.filter(
+			(row) => row.admin === true || row.groupAdmin === true,
+		);
+		if (admins.length === 0) return;
+		const who = event.sender.name ?? event.sender.id;
+		const text =
+			`Pairing request from ${who} on ${deps.channel.label}.\n` +
+			`/pair approve ${code} <user>\n` +
+			`/pair deny ${code}`;
+		// Buttons when they fit: one "Approve as <user>" per DIRECTORY
+		// user plus Deny, within `buttons.max` (the max-1 bound leaves
+		// room for the Deny row entry). Too many users → text only.
+		const caps = deps.channel.capabilities.buttons;
+		const rows: readonly ButtonRow[] | undefined =
+			caps === undefined || users.length > caps.max - 1
+				? undefined
+				: [
+						[
+							...users.map((row) => ({
+								label: `Approve as ${row.user}`,
+								data: access.tokens.issue({
+									kind: "pair",
+									code,
+									decision: "approve",
+									user: row.user,
+								}),
+								style: "primary" as const,
+							})),
+							{
+								label: "Deny",
+								data: access.tokens.issue({
+									kind: "pair",
+									code,
+									decision: "deny",
+								}),
+								style: "danger" as const,
+							},
+						],
+					];
+		for (const admin of admins) {
+			// §8.8: an admin's home chats are always DMs; the notice rides
+			// THIS channel's adapter, so only this channel's homes get it.
+			for (const home of access.identities.homesOf(admin.user)) {
+				if (home.channel !== channelId) continue;
+				await sendNotice(home.chat, text, rows);
+			}
+		}
+	}
+
 	/** Step 10: the submit + the M12 error outcomes. */
 	async function submit(
 		channelId: string,
@@ -363,6 +563,7 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 				await sendNotice(
 					event.chat,
 					UNSERVED_MODEL_NOTICE.replace("<ref>", ref),
+					undefined,
 				);
 				return dropped();
 			}
@@ -382,6 +583,7 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 				await sendNotice(
 					event.chat,
 					"Could not deliver that message. Try again in a moment.",
+					undefined,
 				);
 				return dropped();
 			}
@@ -390,8 +592,16 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 	}
 
 	/** Send one notice reply through the adapter (errors logged, never thrown). */
-	async function sendNotice(chat: ChatRef, text: string): Promise<void> {
-		const message: OutboundMessage = { chat, text };
+	async function sendNotice(
+		chat: ChatRef,
+		text: string,
+		buttons: readonly ButtonRow[] | undefined,
+	): Promise<void> {
+		const message: OutboundMessage = {
+			chat,
+			text,
+			...(buttons === undefined ? {} : { buttons }),
+		};
 		try {
 			await deps.channel.send(message);
 		} catch (error) {
@@ -473,11 +683,69 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 		);
 	}
 
-	// The flush handle rides the returned receive function (a property,
-	// not a separate return shape — the engine holds the same callable it
-	// wires into every adapter's context).
+	// The tap handler (§8.7 button tokens): a pair decision needs an
+	// EFFECTIVE admin tapper (C8) — the tapper's platform identity maps
+	// through the same allowlist/links, then the directory record's
+	// admin flag or group grant decides. Everything else resolves
+	// quietly: a replayed/foreign token, an unknown sender, a plain
+	// user. The requester's "linked" notice rides `approvePairing`.
+	async function pipelineAction(
+		channelId: string,
+		event: ActionEvent,
+		config: ChannelConfig,
+	): Promise<void> {
+		const action = access.tokens.resolve(event.data);
+		if (action === undefined || action.kind !== "pair") return;
+		const tapper = access.identities.userFor(
+			config,
+			channelId,
+			event.sender.id,
+		);
+		if (tapper === undefined) {
+			deps.log.once(
+				`tap-unknown:${channelId}:${event.sender.id}`,
+				"warn",
+				"pairing button tap from an unknown sender ignored",
+			);
+			return;
+		}
+		const record = await deps.host.users.get(tapper.user);
+		if (record === undefined || (record.admin !== true && record.groupAdmin !== true)) {
+			deps.log.once(
+				`tap-not-admin:${channelId}:${tapper.user}`,
+				"warn",
+				`pairing button tap by non-admin "${tapper.user}" ignored`,
+			);
+			return;
+		}
+		const pairDeps = {
+			host: deps.host,
+			identities: access.identities,
+			pairing: access.pairing,
+			channelOf: (id: string): ChannelContribution | undefined =>
+				id === channelId ? deps.channel : undefined,
+			log: deps.log,
+			now,
+		};
+		if (action.decision === "deny") {
+			await denyPairing(pairDeps, action.code);
+			return;
+		}
+		if (action.user === undefined) return;
+		await approvePairing(pairDeps, action.code, action.user);
+	}
+
+	// The flush + tap handles ride the returned receive function
+	// (properties, not a separate return shape — the engine holds the
+	// same callable it wires into every adapter's context).
 	receivePipeline.flushAlbums = flushAlbums;
+	receivePipeline.action = pipelineAction;
 	return receivePipeline;
+}
+
+/** Is `text` a `/link` invocation (with or without an argument)? */
+function isLinkCommand(text: string): boolean {
+	return text === "/link" || text.startsWith("/link ");
 }
 
 /** Extract the `provider/modelId` ref from an UnservedModelError-like. */

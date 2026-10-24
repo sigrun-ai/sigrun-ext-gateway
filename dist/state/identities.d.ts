@@ -41,6 +41,13 @@ export declare class IdentityStore {
     /** Link `senderId` on `channel` to `user`; the FIRST link also sets
      *  the user's home chat on that channel (§8.8). */
     link(channel: string, senderId: string, user: string, via: LinkVia, dmChat: ChatRef): Promise<void>;
+    /**
+     * The stored link's user for `senderId` on `channel` (the LINK alone,
+     * never the allowlist): the pairing/self-link conflict guards read
+     * this — a sender already linked to a DIFFERENT user must refuse,
+     * never silently re-point (§8.2).
+     */
+    linkedUserOf(channel: string, senderId: string): string | undefined;
     /** Remove every link and home chat of `user` (the userDeleted path). */
     unlinkUser(user: string): Promise<void>;
     /** The user's home chats, one per channel. */

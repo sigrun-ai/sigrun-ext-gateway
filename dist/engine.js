@@ -28,6 +28,12 @@ import { readConfig } from "./config.js";
 import { createLog } from "./log.js";
 import { createPipeline } from "./inbound/pipeline.js";
 import { Supervisor, } from "./supervisor.js";
+import { PairingStore } from "./access/pairing.js";
+import { LinkCodes } from "./access/link-codes.js";
+import { LoopGuard } from "./access/loop-guard.js";
+import { ButtonTokens } from "./inbound/tokens.js";
+import { IdentityStore } from "./state/identities.js";
+import { hashId } from "./log.js";
 /** The engine's own timer defaults (the real world). */
 function defaultTimers() {
     return {
@@ -78,6 +84,18 @@ export function createEngine(host, deps = {}) {
     // channel's in-flight albums).
     const pipelines = [];
     let started = false;
+    // The engine-wide access state (Task 4): ONE pairing queue, link-code
+    // table, token table and loop guard shared by every channel pipeline
+    // and the pair/link commands. Built over the engine's state dir at
+    // factory time (cheap: the stores load synchronously; no timers, no
+    // I/O beyond the state reads — the pi lifecycle rule holds).
+    const access = {
+        identities: new IdentityStore(join(gatewayDir, "identities.json")),
+        pairing: new PairingStore(join(gatewayDir, "pairing.json")),
+        linkCodes: new LinkCodes(),
+        tokens: new ButtonTokens(),
+        loopGuard: new LoopGuard(),
+    };
     // The engine-owned half of every adapter context (Task 3's pipeline
     // drives `receive`; the supervisor's makeContext seam stays stable).
     // `supervisorOf` is resolved lazily — the context is built only during
@@ -105,6 +123,7 @@ export function createEngine(host, deps = {}) {
             stateDir: gatewayDir,
             log: channelLog,
             origins,
+            access,
         });
         pipelines.push(receivePipeline);
         return {
@@ -139,8 +158,24 @@ export function createEngine(host, deps = {}) {
                     throw error;
                 }
             },
-            // Button taps have no token table until Task 4/9 — swallow.
-            action: async () => { },
+            // Button taps route through the pipeline's token handler (Task
+            // 4: pair decisions; Task 9 adds interactions). A tap on an
+            // unknown channel block drops like an event would.
+            action: async (event) => {
+                try {
+                    const config = await readConfig(host);
+                    const block = config.channels[id];
+                    if (block === undefined || "failed" in block)
+                        return;
+                    await receivePipeline.action(id, event, block);
+                }
+                catch (error) {
+                    // A tap failure never rejects the adapter's ack: the token is
+                    // consumed, the decision lost — logged loud, never retried
+                    // (a replayed tap is a no-op by the token's single use).
+                    channelLog.error("action failed", error);
+                }
+            },
             status: report,
             fail: () => {
                 // The supervisor wraps this member (its own fail routes into
@@ -173,6 +208,23 @@ export function createEngine(host, deps = {}) {
         stateDir: gatewayDir,
         channelIds: () => channels.map((entry) => entry.channel.id),
         status,
+        pairingStatus: () => access.pairing.pending().map((row) => ({
+            channel: row.channel,
+            sender: hashId(row.senderId),
+            createdAt: row.createdAt,
+        })),
+        /** The engine-wide access state (the commands and pipelines share). */
+        accessState: () => access,
+        /** The `/pair` decision deps over the shared state (the factory's
+         *  command closes over these). */
+        pairDeps: (hostArg) => ({
+            host: hostArg,
+            identities: access.identities,
+            pairing: access.pairing,
+            channelOf: (id) => channels.find((entry) => entry.channel.id === id)?.channel,
+            log,
+            now: timers.now,
+        }),
         start: async (ctx) => {
             // ONE start per engine instance (the handle's lazy `started`
             // already guards re-reads; this guards a direct second call).
