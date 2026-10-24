@@ -104,7 +104,7 @@ export interface PipelineDeps {
 }
 /** The pipeline's narrow stream seam; StreamRegistry and test fakes fit it. */
 export interface PipelineStreams {
-    open(conversationId: number, origin: StreamOrigin): Promise<void>;
+    open(conversationId: number, origin: StreamOrigin): Promise<boolean>;
     abandon(conversationId: number): void;
 }
 /**

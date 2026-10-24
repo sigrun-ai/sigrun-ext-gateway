@@ -161,6 +161,7 @@ describe("StreamRegistry edit streaming", () => {
 			const owned = await harness.registry.finalize(7, ["The settled answer, not the preview"]);
 			expect(owned).toBe(true);
 			expect(harness.edits.at(-1)?.message.text).toBe("The settled answer, not the preview");
+			expect(harness.host.watchCount(7 as ConversationId)).toBe(0);
 			harness.host.pushView(7 as ConversationId, liveView("Hello world, this is long enough after release"));
 			await vi.advanceTimersByTimeAsync(200);
 			expect(harness.edits.at(-1)?.message.text).toBe("The settled answer, not the preview");
@@ -230,6 +231,7 @@ describe("StreamRegistry edit streaming", () => {
 		try {
 			await harness.registry.open(7, ORIGIN);
 			harness.registry.abandon(7);
+			expect(harness.host.watchCount(7 as ConversationId)).toBe(0);
 			harness.host.pushView(7 as ConversationId, liveView("Hello world, this is"));
 			await vi.advanceTimersByTimeAsync(0);
 			expect(harness.sent).toHaveLength(0);

@@ -36,6 +36,7 @@ export interface StreamRegistryDeps {
 
 interface ActiveStream {
 	readonly conversationId: number;
+	readonly opening: object;
 	readonly origin: StreamOrigin;
 	readonly channel: ChannelContribution;
 	readonly releaseWatch: () => Promise<void>;
@@ -66,26 +67,26 @@ export class StreamRegistry implements Streams {
 		});
 	}
 
-	async open(conversationId: number, origin: StreamOrigin): Promise<void> {
+	async open(conversationId: number, origin: StreamOrigin): Promise<boolean> {
 		// One preview per conversation: a second admission is final-only;
 		// abandoning here would freeze the owning run's streamed partial.
-		if (this.active.has(conversationId) || this.openings.has(conversationId)) return;
+		if (this.active.has(conversationId) || this.openings.has(conversationId)) return false;
 		const opening = {};
 		this.openings.set(conversationId, opening);
 		const channel = this.deps.channelOf(origin.channel);
 		const config = await this.deps.configOf(origin.channel);
 		if (channel === undefined || config === undefined || !config.stream) {
 			this.openings.delete(conversationId);
-			return;
+			return false;
 		}
 		if (channel.capabilities.edit !== undefined && channel.edit === undefined) {
 			this.openings.delete(conversationId);
 			this.deps.log.error(`stream: channel "${channel.id}" declares edit capabilities without edit()`);
-			return;
+			return false;
 		}
 		// Abandon/reopen while the config read was awaiting invalidates this
 		// open; without the generation check it could orphan a fresh watch.
-		if (this.openings.get(conversationId) !== opening) return;
+		if (this.openings.get(conversationId) !== opening) return false;
 		let listener: ((view: Parameters<typeof liveGenerationText>[0]) => void) | undefined;
 		const releaseWatch = await this.deps.host.conversations.watch(
 			conversationId as import("@earendil-works/pi-durable").ConversationId,
@@ -93,11 +94,12 @@ export class StreamRegistry implements Streams {
 		);
 		if (this.openings.get(conversationId) !== opening) {
 			await releaseWatch();
-			return;
+			return false;
 		}
 		this.openings.delete(conversationId);
 		const state: ActiveStream = {
 			conversationId,
+			opening,
 			origin,
 			channel,
 			releaseWatch,
@@ -118,12 +120,15 @@ export class StreamRegistry implements Streams {
 		};
 		this.active.set(conversationId, state);
 		if (channel.capabilities.edit === undefined) this.startTyping(state);
+		return true;
 	}
 
 	async finalize(conversationId: number, chunks: string[]): Promise<boolean> {
-		this.openings.delete(conversationId);
 		const state = this.active.get(conversationId);
 		if (state === undefined) return false;
+		if (this.openings.get(conversationId) === state.opening) {
+			this.openings.delete(conversationId);
+		}
 		this.active.delete(conversationId);
 		state.closed = true;
 		state.cancelEdit?.();
@@ -153,8 +158,16 @@ export class StreamRegistry implements Streams {
 	}
 
 	abandon(conversationId: number): void {
-		this.openings.delete(conversationId);
 		const state = this.active.get(conversationId);
+		if (state !== undefined) {
+			if (this.openings.get(conversationId) === state.opening) {
+				this.openings.delete(conversationId);
+			}
+		} else {
+			// Before activation, the opening itself is the only ownership
+			// handle; deleting it invalidates that pending preview.
+			this.openings.delete(conversationId);
+		}
 		if (state === undefined) return;
 		this.active.delete(conversationId);
 		state.closed = true;

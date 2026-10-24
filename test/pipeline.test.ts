@@ -514,7 +514,11 @@ describe("engine stopIntake: the album flush (Review finding 1)", () => {
 });
 
 describe("pipeline: streaming seam", () => {
-	test("opens the stream before submit and abandons it when submit throws", async () => {
+	async function streamRig(owns: () => boolean): Promise<{
+		host: FakeHost;
+		calls: string[];
+		receive: (event: InboundEvent) => Promise<Outcome>;
+	}> {
 		const dir = await mkdtemp(join(tmpdir(), "sigrun-gw-pipeline-"));
 		cleanups.push(() => rm(dir, { recursive: true, force: true }));
 		const host = await createFakeHost({ storesDir: dir, users: [{ user: "alice", admin: true }] });
@@ -531,18 +535,42 @@ describe("pipeline: streaming seam", () => {
 			log: silentLog(),
 			origins: new Map(),
 			streams: {
-				open: async () => { calls.push("open"); },
+				open: async () => {
+					calls.push("open");
+					return owns();
+				},
 				abandon: () => { calls.push("abandon"); },
 			},
 		});
 		const parsed = parseGatewayConfig({
 			channels: { loop: { dm: "allowlist", allow: [{ sender: "100000001", user: "alice" }] } },
 		}).channels.loop as import("../src/config.js").ChannelConfig;
-		await raw("loop", dmEvent({ messageId: "stream-order" }), parsed);
+		return { host, calls, receive: (event) => raw("loop", event, parsed) };
+	}
+
+	test("opens before submit and abandons an owned stream when submit throws", async () => {
+		const { host, calls, receive } = await streamRig(() => true);
+		await receive(dmEvent({ messageId: "stream-order" }));
 		expect(calls).toEqual(["open", "submit"]);
 		failNextSubmit(host, new Error("synthetic submit failure"));
-		await expect(raw("loop", dmEvent({ messageId: "stream-failure" }), parsed)).rejects.toThrow("synthetic submit failure");
+		await expect(receive(dmEvent({ messageId: "stream-failure" }))).rejects.toThrow("synthetic submit failure");
 		expect(calls).toEqual(["open", "submit", "open", "abandon"]);
+	});
+
+	test("a second admission's failed submit does not abandon the first stream", async () => {
+		let opens = 0;
+		const { host, calls, receive } = await streamRig(() => ++opens === 1);
+		await receive(dmEvent({ messageId: "stream-owner" }));
+		failNextSubmit(host, new Error("synthetic second submit failure"));
+		await expect(receive(dmEvent({ messageId: "stream-nonowner" }))).rejects.toThrow("synthetic second submit failure");
+		expect(calls).toEqual(["open", "submit", "open"]);
+	});
+
+	test("open returning false plus a submit throw never abandons", async () => {
+		const { host, calls, receive } = await streamRig(() => false);
+		failNextSubmit(host, new Error("synthetic unowned failure"));
+		await expect(receive(dmEvent({ messageId: "stream-unowned" }))).rejects.toThrow("synthetic unowned failure");
+		expect(calls).toEqual(["open"]);
 	});
 });
 

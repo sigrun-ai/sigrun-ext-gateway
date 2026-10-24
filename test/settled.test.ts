@@ -435,6 +435,24 @@ describe("onRunSettled: the streaming hand-off", () => {
 		expect(harness.ledger.nextPending("loop")?.message.text).toBe("foreign answer");
 	});
 
+	test("a gateway-originated unanswered settle abandons its stream once", async () => {
+		const harness = await rig();
+		await harness.bindings.bind(KEY, 7, CHAT);
+		let abandonCalls = 0;
+		const deps: SettledDeps = {
+			...harness.deps,
+			origins: new Map<SubmissionId, SubmissionOrigin>([
+				[1 as SubmissionId, { bindingKey: KEY, channel: "loop", chat: CHAT }],
+			]),
+			streams: {
+				finalize: async () => false,
+				abandon: () => { abandonCalls++; },
+			},
+		};
+		await onRunSettled(unansweredEvent(7, "model_error"), deps);
+		expect(abandonCalls).toBe(1);
+	});
+
 	test("a foreign unanswered settle never abandons the gateway's live stream", async () => {
 		const harness = await rig();
 		let abandonCalls = 0;

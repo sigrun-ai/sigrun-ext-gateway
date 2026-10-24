@@ -298,11 +298,12 @@ export function createPipeline(deps) {
             channel: channelId,
             chat: event.chat,
         };
+        let ownsStream = false;
         if (deps.streams !== undefined) {
             try {
                 // Open BEFORE submit: a fast provider may publish its first (or
                 // only) live frame before submit's promise resolves.
-                await deps.streams.open(conversationId, origin);
+                ownsStream = await deps.streams.open(conversationId, origin);
             }
             catch (error) {
                 // Admission must still proceed when only the preview cannot open.
@@ -316,7 +317,8 @@ export function createPipeline(deps) {
             return { outcome: "admitted" };
         }
         catch (error) {
-            deps.streams?.abandon(conversationId);
+            if (ownsStream)
+                deps.streams?.abandon(conversationId);
             if (error instanceof Error &&
                 error.name === "UnservedModelError") {
                 // The pinned notice with the ref interpolated (M12). Named

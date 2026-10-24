@@ -28,7 +28,7 @@ export declare class StreamRegistry implements Streams {
     private readonly active;
     private readonly openings;
     constructor(deps: StreamRegistryDeps);
-    open(conversationId: number, origin: StreamOrigin): Promise<void>;
+    open(conversationId: number, origin: StreamOrigin): Promise<boolean>;
     finalize(conversationId: number, chunks: string[]): Promise<boolean>;
     abandonAll(): void;
     abandon(conversationId: number): void;

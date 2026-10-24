@@ -135,7 +135,7 @@ export interface PipelineDeps {
 
 /** The pipeline's narrow stream seam; StreamRegistry and test fakes fit it. */
 export interface PipelineStreams {
-	open(conversationId: number, origin: StreamOrigin): Promise<void>;
+	open(conversationId: number, origin: StreamOrigin): Promise<boolean>;
 	abandon(conversationId: number): void;
 }
 
@@ -553,11 +553,12 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 			channel: channelId,
 			chat: event.chat,
 		};
+		let ownsStream = false;
 		if (deps.streams !== undefined) {
 			try {
 				// Open BEFORE submit: a fast provider may publish its first (or
 				// only) live frame before submit's promise resolves.
-				await deps.streams.open(conversationId as number, origin);
+				ownsStream = await deps.streams.open(conversationId as number, origin);
 			} catch (error) {
 				// Admission must still proceed when only the preview cannot open.
 				deps.log.error("stream open failed", error);
@@ -573,7 +574,7 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 			deps.origins.set(record.id as SubmissionId, origin);
 			return { outcome: "admitted" };
 		} catch (error) {
-			deps.streams?.abandon(conversationId as number);
+			if (ownsStream) deps.streams?.abandon(conversationId as number);
 			if (
 				error instanceof Error &&
 				error.name === "UnservedModelError"

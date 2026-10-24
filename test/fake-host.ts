@@ -82,6 +82,8 @@ export interface FakeHost extends SigrunHost {
 	setClaimed(claimed: boolean): void;
 	/** Push one view to every `watch` listener of `id`. */
 	pushView(id: ConversationId, view: ConversationViewWire): void;
+	/** Current watch registrations for leak assertions. */
+	watchCount(id: ConversationId): number;
 	/** The stored interaction records, keyed `${conversationId}:${callId}`. */
 	readonly interactions: ReadonlyMap<string, InteractionRecord>;
 	/** The stored conversation metas, keyed id. */
@@ -564,6 +566,8 @@ export async function createFakeHost(
 				if (watcher.id === id) watcher.listener(view);
 			}
 		},
+		watchCount: (id: ConversationId): number =>
+			watchList.filter((watcher) => watcher.id === id).length,
 		interactions,
 		metas,
 		close: async () => {
