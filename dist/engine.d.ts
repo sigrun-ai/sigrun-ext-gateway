@@ -81,7 +81,9 @@ export interface EngineInternals {
      * this): enqueues the finals/notices, then kicks the affected
      * channels' workers.
      */
-    settle(event: import("@sigrun/sigrun/extension").RunSettledEvent): Promise<void>;
+    settle(event: import("@sigrun/sigrun/extension").RunSettledEvent, api?: import("@sigrun/sigrun/extension").MemoryEventApi, context?: import("@sigrun/sigrun/extension").HandlerContext): Promise<void>;
+    /** The home-chat notifier and its enqueue-then-kick delivery path. */
+    notifier(): import("@sigrun/sigrun/extension").NotifierContribution;
 }
 /**
  * Build the engine over the host. The factory wires the real

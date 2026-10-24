@@ -47,6 +47,14 @@ export interface Streams {
 /** onRunSettled's injectable dependencies. */
 export interface SettledDeps {
     readonly host: SigrunHost;
+    /** The event bus's bridge-free document read (factory-supplied). */
+    readonly readMeta?: (conversationId: number) => Promise<{
+        readonly owner?: string;
+        readonly name?: string;
+        readonly autoName?: string;
+        readonly jobId?: string;
+        readonly deliver?: string[];
+    } | undefined>;
     /** The engine-wide bindings (the delivery fan-out read). */
     readonly bindings: BindingStore;
     /** The engine-wide identity links (the binding's user resolution). */

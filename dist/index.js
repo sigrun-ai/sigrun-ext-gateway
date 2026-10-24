@@ -65,7 +65,10 @@ export default function createGateway(host) {
         // kicks the workers. The `api` (the narrowed conversation read)
         // and the context are unused here: the fan-out reads the answer
         // from the event itself.
-        runSettled: (event) => engine.settle(event),
+        runSettled: (event, api, context) => engine.settle(event, api, context),
+        // Home-chat notifications share the delivery ledger and workers;
+        // this wrapper kicks delivery after each bounded enqueue.
+        notifiers: [engine.notifier()],
         // The admin status route (§8.12): mounts at /v1/ext/gateway/status,
         // admin-gated by core's route mounting (the handler renders the
         // engine's read; `pairing` rows carry the hashed sender id, never
@@ -85,6 +88,8 @@ export { renderChunks } from "./outbound/render.js";
 export { Ledger, PRUNE_AFTER_MS } from "./state/ledger.js";
 export { DeliveryWorker, RESENT_MARKER } from "./outbound/delivery.js";
 export { onRunSettled, NO_TEXT_REPLY, STOPPED } from "./outbound/settled.js";
+export { parseTarget, resolveTargets } from "./jobs.js";
+export { createNotifier } from "./notify.js";
 export { StreamRegistry } from "./outbound/stream.js";
 export { Supervisor } from "./supervisor.js";
 export { createStatusRoute } from "./status-route.js";

@@ -38,6 +38,8 @@ import { IdentityStore } from "./state/identities.js";
 import { Ledger } from "./state/ledger.js";
 import { DeliveryWorker } from "./outbound/delivery.js";
 import { onRunSettled } from "./outbound/settled.js";
+import { createNotifier } from "./notify.js";
+import { SessionMetaDoc } from "./session-meta.js";
 import { StreamRegistry } from "./outbound/stream.js";
 import { hashId } from "./log.js";
 /** The engine's own timer defaults (the real world). */
@@ -237,7 +239,7 @@ export function createEngine(host, deps = {}) {
     /** The settled-run fan-out deps (the factory's `runSettled` closes over
      *  these — the same stores the pipelines and commands share, plus the
      *  delivery ledger and the stream registry). */
-    const settledDeps = () => ({
+    const settledDeps = (api, context) => ({
         host,
         bindings,
         identities: access.identities,
@@ -251,7 +253,25 @@ export function createEngine(host, deps = {}) {
         origins,
         streams,
         log,
+        // The event bus's narrowed snapshot API works in harness-only
+        // embedders; host.conversations.meta would wait for a server
+        // bridge that those embedders never create.
+        readMeta: api === undefined || context === undefined
+            ? undefined
+            : async (conversationId) => await api.document(SessionMetaDoc, conversationId, context),
     });
+    const notifyDeps = () => ({
+        host,
+        bindings,
+        identities: access.identities,
+        ledger,
+        readConfig: () => readConfig(host),
+        log,
+    });
+    const kickWorkers = () => {
+        for (const worker of workers.values())
+            worker.kick();
+    };
     const ctxLog = (scope) => ({
         info: (msg) => log.info(`[${scope}] ${msg}`),
         warn: (msg) => log.warn(`[${scope}] ${msg}`),
@@ -291,18 +311,27 @@ export function createEngine(host, deps = {}) {
             log,
             now: timers.now,
         }),
-        settle: async (event) => {
+        notifier: () => {
+            const notifier = createNotifier(notifyDeps());
+            return {
+                name: notifier.name,
+                notify: async (event, ctx) => {
+                    await notifier.notify(event, ctx);
+                    kickWorkers();
+                },
+            };
+        },
+        settle: async (event, api, context) => {
             // The fan-out runs over the engine's deps, then every LIVE
             // worker kicks (an entry for an unsupervised channel parks in
             // the ledger — the channel's next start drains it). The prune
             // rides settles too: a long-lived engine prunes without owning
             // a recurring timer.
-            await onRunSettled(event, settledDeps());
+            await onRunSettled(event, settledDeps(api, context));
             await ledger.prune(timers.now()).catch((error) => {
                 log.error("ledger prune failed", error);
             });
-            for (const worker of workers.values())
-                worker.kick();
+            kickWorkers();
         },
         start: async (ctx) => {
             // ONE start per engine instance (the handle's lazy `started`

@@ -42,6 +42,10 @@ export class Ledger {
         // entries from its first read.
         this.entries = this.file.readSync().entries;
     }
+    /** A snapshot of the entries (dedupe and status reads). */
+    list() {
+        return this.entries;
+    }
     /**
      * Enqueue one entry (state `pending`, stamped id/createdAt). Returns
      * undefined when `tag` is already present (the dedupe no-op) — the

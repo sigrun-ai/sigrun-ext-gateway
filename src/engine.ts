@@ -52,6 +52,8 @@ import { IdentityStore } from "./state/identities.js";
 import { Ledger } from "./state/ledger.js";
 import { DeliveryWorker } from "./outbound/delivery.js";
 import { onRunSettled, type SettledDeps } from "./outbound/settled.js";
+import { createNotifier, type NotifyDeps } from "./notify.js";
+import { SessionMetaDoc } from "./session-meta.js";
 import { StreamRegistry } from "./outbound/stream.js";
 import type { AccessState } from "./inbound/pipeline.js";
 import type { StatusPairingRow } from "./status-route.js";
@@ -109,7 +111,13 @@ export interface EngineInternals {
 	 * this): enqueues the finals/notices, then kicks the affected
 	 * channels' workers.
 	 */
-	settle(event: import("@sigrun/sigrun/extension").RunSettledEvent): Promise<void>;
+	settle(
+		event: import("@sigrun/sigrun/extension").RunSettledEvent,
+		api?: import("@sigrun/sigrun/extension").MemoryEventApi,
+		context?: import("@sigrun/sigrun/extension").HandlerContext,
+	): Promise<void>;
+	/** The home-chat notifier and its enqueue-then-kick delivery path. */
+	notifier(): import("@sigrun/sigrun/extension").NotifierContribution;
 }
 
 /** The engine's own timer defaults (the real world). */
@@ -335,7 +343,10 @@ export function createEngine(
 	/** The settled-run fan-out deps (the factory's `runSettled` closes over
 	 *  these — the same stores the pipelines and commands share, plus the
 	 *  delivery ledger and the stream registry). */
-	const settledDeps = (): SettledDeps => ({
+	const settledDeps = (
+		api?: import("@sigrun/sigrun/extension").MemoryEventApi,
+		context?: import("@sigrun/sigrun/extension").HandlerContext,
+	): SettledDeps => ({
 		host,
 		bindings,
 		identities: access.identities,
@@ -350,7 +361,29 @@ export function createEngine(
 		origins,
 		streams,
 		log,
+		// The event bus's narrowed snapshot API works in harness-only
+		// embedders; host.conversations.meta would wait for a server
+		// bridge that those embedders never create.
+		readMeta: api === undefined || context === undefined
+			? undefined
+			: async (conversationId) => await api.document(
+				SessionMetaDoc,
+				conversationId as import("@earendil-works/pi-durable").ConversationId,
+				context,
+			),
 	});
+
+	const notifyDeps = (): NotifyDeps => ({
+		host,
+		bindings,
+		identities: access.identities,
+		ledger,
+		readConfig: () => readConfig(host),
+		log,
+	});
+	const kickWorkers = (): void => {
+		for (const worker of workers.values()) worker.kick();
+	};
 
 	const ctxLog = (scope: string): EngineLog => ({
 		info: (msg) => log.info(`[${scope}] ${msg}`),
@@ -397,19 +430,31 @@ export function createEngine(
 			log,
 			now: timers.now,
 		}),
+		notifier: () => {
+			const notifier = createNotifier(notifyDeps());
+			return {
+				name: notifier.name,
+				notify: async (event, ctx) => {
+					await notifier.notify(event, ctx);
+					kickWorkers();
+				},
+			};
+		},
 		settle: async (
 			event: import("@sigrun/sigrun/extension").RunSettledEvent,
+			api?: import("@sigrun/sigrun/extension").MemoryEventApi,
+			context?: import("@sigrun/sigrun/extension").HandlerContext,
 		): Promise<void> => {
 			// The fan-out runs over the engine's deps, then every LIVE
 			// worker kicks (an entry for an unsupervised channel parks in
 			// the ledger — the channel's next start drains it). The prune
 			// rides settles too: a long-lived engine prunes without owning
 			// a recurring timer.
-			await onRunSettled(event, settledDeps());
+			await onRunSettled(event, settledDeps(api, context));
 			await ledger.prune(timers.now()).catch((error: unknown) => {
 				log.error("ledger prune failed", error);
 			});
-			for (const worker of workers.values()) worker.kick();
+			kickWorkers();
 		},
 		start: async (ctx: GatewayEngineContext): Promise<void> => {
 			// ONE start per engine instance (the handle's lazy `started`

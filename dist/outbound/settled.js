@@ -22,6 +22,7 @@
  *   short reason notice otherwise.
  */
 import { renderChunks } from "./render.js";
+import { resolveTargets } from "../jobs.js";
 /** The pinned notice for a textless answer (Review Focus 4). */
 export const NO_TEXT_REPLY = "(no text reply)";
 /** The pinned abort notice (spec §8.6: "An abort from /stop produces Stopped."). */
@@ -48,6 +49,7 @@ async function run(event, deps) {
     const conversationId = event.conversationId;
     if (event.outcome.status === "answered") {
         await fanOutAnswer(event, deps, conversationId);
+        await deliverJobAnswer(event, deps, conversationId);
         return;
     }
     if (originKeyOf(deps, event) !== undefined) {
@@ -125,6 +127,51 @@ async function fanOutAnswer(event, deps, conversationId) {
                 // The tag is chunk-indexed: a multi-chunk final's entries are
                 // distinct rows (a replayed settle re-dedupes the whole set).
                 tag: `final:${conversationId}:${String(event.outcome.answerEntryId)}:${key}:${index}`,
+            });
+        }
+    }
+}
+/**
+ * A new-conversation job's FIRST answered settle: resolve the meta's
+ * targets and enqueue one headed answer per target. The job-tag prefix
+ * makes this one-shot even when later runs carry different answers.
+ */
+async function deliverJobAnswer(event, deps, conversationId) {
+    if (deps.ledger.list().some((entry) => entry.tag?.startsWith(`job:${conversationId}:`) === true))
+        return;
+    const meta = deps.readMeta === undefined
+        ? await deps.host.conversations.meta(conversationId)
+        : await deps.readMeta(conversationId);
+    if (meta?.jobId === undefined || meta.deliver === undefined)
+        return;
+    const owner = meta.owner;
+    if (owner === undefined) {
+        deps.log.warn(`job delivery rejected (conversation ${conversationId}): no owner`);
+        return;
+    }
+    const targets = await resolveTargets(deps, owner, meta.deliver);
+    for (const rejected of targets.rejected) {
+        deps.log.warn(`job delivery rejected (conversation ${conversationId}, target "${rejected.target}"): ${rejected.reason}`);
+    }
+    const text = answerText(event);
+    const body = text === "" ? NO_TEXT_REPLY : text;
+    const name = meta.name ?? meta.autoName ?? `Conversation ${conversationId}`;
+    for (const target of targets.resolved) {
+        const channel = deps.channelOf(target.channel);
+        if (channel === undefined) {
+            deps.log.warn(`job delivery skipped: no channel "${target.channel}"`);
+            continue;
+        }
+        const chunks = renderChunks(`Job ${name}\n${body}`, channel.capabilities, channel.format);
+        for (let index = 0; index < chunks.length; index++) {
+            await deps.ledger.enqueue({
+                channel: target.channel,
+                chat: target.chat,
+                kind: "final",
+                message: { chat: target.chat, text: chunks[index] },
+                // The target suffix distinguishes simultaneous targets; the
+                // chunk index distinguishes rows of a split answer.
+                tag: `job:${conversationId}:${target.channel}:${target.chat.chatId}:${index}`,
             });
         }
     }

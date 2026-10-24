@@ -46,6 +46,10 @@ export class BindingStore {
         // it went stale across instances; readSync is the fix that stays.
         return toBinding(this.file.readSync().bindings[key]);
     }
+    /** Every live binding key (target authorization and chat enumeration). */
+    allKeys() {
+        return Object.keys(this.file.readSync().bindings);
+    }
     /** Every live key bound to `conversationId` (the delivery fan-out read). */
     keysOf(conversationId) {
         const keys = [];

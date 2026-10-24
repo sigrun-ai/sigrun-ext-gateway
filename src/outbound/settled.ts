@@ -36,6 +36,7 @@ import type { EngineLog } from "../log.js";
 import type { IdentityStore } from "../state/identities.js";
 import { renderChunks } from "./render.js";
 import type { SubmissionOrigin } from "../inbound/pipeline.js";
+import { resolveTargets } from "../jobs.js";
 
 /** The pinned notice for a textless answer (Review Focus 4). */
 export const NO_TEXT_REPLY = "(no text reply)";
@@ -68,6 +69,14 @@ export interface Streams {
 /** onRunSettled's injectable dependencies. */
 export interface SettledDeps {
 	readonly host: SigrunHost;
+	/** The event bus's bridge-free document read (factory-supplied). */
+	readonly readMeta?: (conversationId: number) => Promise<{
+		readonly owner?: string;
+		readonly name?: string;
+		readonly autoName?: string;
+		readonly jobId?: string;
+		readonly deliver?: string[];
+	} | undefined>;
 	/** The engine-wide bindings (the delivery fan-out read). */
 	readonly bindings: BindingStore;
 	/** The engine-wide identity links (the binding's user resolution). */
@@ -113,6 +122,7 @@ async function run(event: RunSettledEvent, deps: SettledDeps): Promise<void> {
 	const conversationId = event.conversationId as number;
 	if (event.outcome.status === "answered") {
 		await fanOutAnswer(event as AnsweredEvent, deps, conversationId);
+		await deliverJobAnswer(event as AnsweredEvent, deps, conversationId);
 		return;
 	}
 	if (originKeyOf(deps, event) !== undefined) {
@@ -208,6 +218,62 @@ async function fanOutAnswer(
 				// The tag is chunk-indexed: a multi-chunk final's entries are
 				// distinct rows (a replayed settle re-dedupes the whole set).
 				tag: `final:${conversationId}:${String(event.outcome.answerEntryId)}:${key}:${index}`,
+			});
+		}
+	}
+}
+
+/**
+ * A new-conversation job's FIRST answered settle: resolve the meta's
+ * targets and enqueue one headed answer per target. The job-tag prefix
+ * makes this one-shot even when later runs carry different answers.
+ */
+async function deliverJobAnswer(
+	event: AnsweredEvent,
+	deps: SettledDeps,
+	conversationId: number,
+): Promise<void> {
+	if (deps.ledger.list().some((entry) =>
+		entry.tag?.startsWith(`job:${conversationId}:`) === true
+	)) return;
+	const meta = deps.readMeta === undefined
+		? await deps.host.conversations.meta(conversationId as ConversationId)
+		: await deps.readMeta(conversationId);
+	if (meta?.jobId === undefined || meta.deliver === undefined) return;
+	const owner = meta.owner;
+	if (owner === undefined) {
+		deps.log.warn(`job delivery rejected (conversation ${conversationId}): no owner`);
+		return;
+	}
+	const targets = await resolveTargets(deps, owner, meta.deliver);
+	for (const rejected of targets.rejected) {
+		deps.log.warn(
+			`job delivery rejected (conversation ${conversationId}, target "${rejected.target}"): ${rejected.reason}`,
+		);
+	}
+	const text = answerText(event);
+	const body = text === "" ? NO_TEXT_REPLY : text;
+	const name = meta.name ?? meta.autoName ?? `Conversation ${conversationId}`;
+	for (const target of targets.resolved) {
+		const channel = deps.channelOf(target.channel);
+		if (channel === undefined) {
+			deps.log.warn(`job delivery skipped: no channel "${target.channel}"`);
+			continue;
+		}
+		const chunks = renderChunks(
+			`Job ${name}\n${body}`,
+			channel.capabilities,
+			channel.format,
+		);
+		for (let index = 0; index < chunks.length; index++) {
+			await deps.ledger.enqueue({
+				channel: target.channel,
+				chat: target.chat,
+				kind: "final",
+				message: { chat: target.chat, text: chunks[index]! },
+				// The target suffix distinguishes simultaneous targets; the
+				// chunk index distinguishes rows of a split answer.
+				tag: `job:${conversationId}:${target.channel}:${target.chat.chatId}:${index}`,
 			});
 		}
 	}
