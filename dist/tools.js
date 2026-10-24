@@ -61,6 +61,7 @@ export function createGatewayTools(deps) {
                     channel: target.channel,
                     chat: target.chat,
                     kind: "notice",
+                    tag: `tool:${api.callId}`,
                     message: {
                         chat: target.chat,
                         text: args.text,
@@ -80,6 +81,9 @@ export function createGatewayTools(deps) {
                     return toolError("The message could not be queued.");
                 deps.kick?.();
                 const receipt = await waitForReceipt(deps.ledger, entry, deps.receiptWaitMs ?? RECEIPT_WAIT_MS, context.abortSignal ?? new AbortController().signal);
+                if (receipt === "failed") {
+                    return toolError("Delivery failed; the message was not sent.");
+                }
                 if (receipt === undefined) {
                     return toolSuccess({ delivered: false, queued: true });
                 }
@@ -162,7 +166,7 @@ async function waitForReceipt(ledger, entry, waitMs, signal) {
         if (current?.state === "delivered")
             return current.receipt ?? [];
         if (current?.state === "failed")
-            return undefined;
+            return "failed";
         if (Date.now() >= deadline)
             return undefined;
         await new Promise((resolve) => {

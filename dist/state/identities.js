@@ -97,8 +97,9 @@ export class IdentityStore {
             chat: row.chat,
         }));
     }
-    /** Install an absent home without an await, preserving admission order.
-     * The durable write is queued behind this synchronous in-memory update. */
+    /** Install an absent home without an await before the mirror update,
+     * preserving admission order. The durable write is queued behind the
+     * synchronous in-memory update; the caller owns its completion/error. */
     ensureHome(user, channel, chat) {
         if (this.homes[user]?.[channel] !== undefined)
             return Promise.resolve();

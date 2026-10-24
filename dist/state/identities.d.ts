@@ -55,8 +55,9 @@ export declare class IdentityStore {
         channel: string;
         chat: ChatRef;
     }[];
-    /** Install an absent home without an await, preserving admission order.
-     * The durable write is queued behind this synchronous in-memory update. */
+    /** Install an absent home without an await before the mirror update,
+     * preserving admission order. The durable write is queued behind the
+     * synchronous in-memory update; the caller owns its completion/error. */
     ensureHome(user: string, channel: string, chat: ChatRef): Promise<void>;
     /** Set (move) the user's home chat on `channel`. */
     setHome(user: string, channel: string, chat: ChatRef): Promise<void>;

@@ -33,7 +33,7 @@ import { LinkCodes } from "./access/link-codes.js";
 import { LoopGuard } from "./access/loop-guard.js";
 import { ButtonTokens } from "./inbound/tokens.js";
 import { chatCommandMenu } from "./commands/chat.js";
-import { BindingStore } from "./state/bindings.js";
+import { bindingKey, BindingStore } from "./state/bindings.js";
 import { IdentityStore } from "./state/identities.js";
 import { Ledger } from "./state/ledger.js";
 import { DeliveryWorker } from "./outbound/delivery.js";
@@ -162,7 +162,7 @@ export function createEngine(host, deps = {}) {
             channelOf,
             stages: {
                 attachments: async (event) => {
-                    const binding = bindings.get(`${id}:default:${event.chat.chatType}:${event.chat.chatId}${event.chat.threadId === undefined ? "" : `:${event.chat.threadId}`}`);
+                    const binding = bindings.get(bindingKey(id, event.chat));
                     if (binding === undefined)
                         return { parts: [], notes: [] };
                     const config = await readConfig(host);
@@ -433,6 +433,7 @@ export function createEngine(host, deps = {}) {
                     setTimer: timers.setTimer,
                     now: timers.now,
                     log: createLog(`channel:${id}`),
+                    resolveFiles: (entry) => ledger.resolveFiles(host, entry),
                 });
                 workers.set(id, worker);
                 // The first attempt settles before start resolves (running

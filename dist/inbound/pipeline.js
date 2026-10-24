@@ -365,16 +365,20 @@ export function createPipeline(deps) {
     }
     /** Step 10: the submit + the M12 error outcomes. */
     async function submit(channelId, event, key, conversationId, user, batch, config) {
-        const text = batch.join("\n");
+        const text = batch.texts.join("\n");
         const media = deps.stages?.attachments === undefined
             ? { parts: [], notes: [] }
-            : await deps.stages.attachments(event);
+            : await deps.stages.attachments({ ...event, attachments: batch.attachments });
         // A media-only event submits its notes, not an empty text block.
         const textParts = [
             ...(text === "" ? [] : [{ type: "text", text }]),
             ...media.notes.map((note) => ({ type: "text", text: note })),
         ];
         const parts = [...media.parts, ...textParts];
+        // Host submission rejects an empty input array; preserve an empty
+        // attachment-less event as an empty text part.
+        if (parts.length === 0)
+            parts.push({ type: "text", text });
         const opts = {
             user,
             requestId: `${key}:${event.messageId}`,
@@ -469,10 +473,10 @@ export function createPipeline(deps) {
         const timer = setTimeout(() => {
             albumTimers.delete(timerKey);
             openAlbums.delete(timerKey);
-            const texts = albums.close(key, event.groupId ?? "");
-            if (texts.length === 0)
+            const batch = albums.close(key, event.groupId ?? "");
+            if (batch.texts.length === 0)
                 return;
-            void submit(channelId, event, key, conversationId, user, texts, config)
+            void submit(channelId, event, key, conversationId, user, batch, config)
                 .catch((error) => {
                 // The timer path has no receive to reject: an unexpected
                 // throw logs loud (the album's events are committed seen;
@@ -500,11 +504,11 @@ export function createPipeline(deps) {
         const pending = [...openAlbums.values()];
         openAlbums.clear();
         await Promise.all(pending.map(async (album) => {
-            const texts = albums.close(album.key, album.groupId);
-            if (texts.length === 0)
+            const batch = albums.close(album.key, album.groupId);
+            if (batch.texts.length === 0)
                 return;
             try {
-                await submit(album.channelId, album.event, album.key, album.conversationId, album.user, texts, album.config);
+                await submit(album.channelId, album.event, album.key, album.conversationId, album.user, batch, album.config);
             }
             catch (error) {
                 deps.log.error("album flush submit failed", error);

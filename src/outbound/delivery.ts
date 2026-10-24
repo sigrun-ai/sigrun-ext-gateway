@@ -38,6 +38,8 @@ export interface DeliveryDeps {
 	readonly log: EngineLog;
 	/** Clock (the tests' virtual clock). Default: real. */
 	readonly now?: () => number;
+	/** Re-read file bytes at send time; ledger entries persist paths only. */
+	readonly resolveFiles?: (entry: LedgerEntry) => Promise<OutboundMessage["files"]>;
 }
 
 /** The pinned resend marker for recovered entries. */
@@ -167,7 +169,7 @@ export class DeliveryWorker {
 	 * Never throws.
 	 */
 	private async sendOne(entry: LedgerEntry): Promise<boolean> {
-		const message = this.buildMessage(entry);
+		const message = await this.buildMessage(entry);
 		try {
 			// The attempting mark rides the same isolation as the rest: a
 			// failing ledger write is LOGGED and the send does not run (an
@@ -322,11 +324,14 @@ export class DeliveryWorker {
 	}
 
 	/** The send-shaped message for one entry (the recovered marker rule). */
-	private buildMessage(entry: LedgerEntry): OutboundMessage {
+	private async buildMessage(entry: LedgerEntry): Promise<OutboundMessage> {
 		const text =
 			entry.recovered === true
 				? `${RESENT_MARKER}\n${entry.message.text}`
 				: entry.message.text;
+		const files = entry.message.files === undefined || this.deps.resolveFiles === undefined
+			? undefined
+			: await this.deps.resolveFiles(entry);
 		return {
 			chat: entry.message.chat,
 			text,
@@ -336,9 +341,7 @@ export class DeliveryWorker {
 			...(entry.message.buttons === undefined
 				? {}
 				: { buttons: entry.message.buttons }),
-			// File bytes resolve at send time (resolveFiles, Task 6's
-			// streaming/interaction entries land later): entries with files
-			// are enqueued by handlers that keep the bytes out of the ledger.
+			...(files === undefined ? {} : { files }),
 		};
 	}
 }

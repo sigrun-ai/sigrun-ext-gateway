@@ -45,7 +45,7 @@ import type { ChannelConfig } from "../config.js";
 import type { EngineLog } from "../log.js";
 import type { StreamOrigin } from "../outbound/stream.js";
 import { buildEnvelope } from "./envelope.js";
-import { AlbumCollector, ALBUM_WINDOW_MS } from "./albums.js";
+import { AlbumCollector, ALBUM_WINDOW_MS, type AlbumBatch } from "./albums.js";
 import { bindingKey, BindingStore } from "../state/bindings.js";
 import { SeenSet } from "../state/seen.js";
 import { IdentityStore } from "../state/identities.js";
@@ -620,19 +620,22 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 		key: string,
 		conversationId: ConversationId,
 		user: string,
-		batch: readonly string[],
+		batch: AlbumBatch,
 		config: ChannelConfig,
 	): Promise<PipelineOutcome> {
-		const text = batch.join("\n");
+		const text = batch.texts.join("\n");
 		const media = deps.stages?.attachments === undefined
 			? { parts: [], notes: [] }
-			: await deps.stages.attachments(event);
+			: await deps.stages.attachments({ ...event, attachments: batch.attachments });
 		// A media-only event submits its notes, not an empty text block.
 		const textParts: SubmissionInputPart[] = [
 			...(text === "" ? [] : [{ type: "text" as const, text }]),
 			...media.notes.map((note) => ({ type: "text" as const, text: note })),
 		];
 		const parts: SubmissionInputPart[] = [...media.parts, ...textParts];
+		// Host submission rejects an empty input array; preserve an empty
+		// attachment-less event as an empty text part.
+		if (parts.length === 0) parts.push({ type: "text", text });
 		const opts: {
 			user: string;
 			requestId: string;
@@ -757,9 +760,9 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 		const timer = setTimeout(() => {
 			albumTimers.delete(timerKey);
 			openAlbums.delete(timerKey);
-			const texts = albums.close(key, event.groupId ?? "");
-			if (texts.length === 0) return;
-			void submit(channelId, event, key, conversationId, user, texts, config)
+			const batch = albums.close(key, event.groupId ?? "");
+			if (batch.texts.length === 0) return;
+			void submit(channelId, event, key, conversationId, user, batch, config)
 				.catch((error: unknown) => {
 					// The timer path has no receive to reject: an unexpected
 					// throw logs loud (the album's events are committed seen;
@@ -788,8 +791,8 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 		openAlbums.clear();
 		await Promise.all(
 			pending.map(async (album) => {
-				const texts = albums.close(album.key, album.groupId);
-				if (texts.length === 0) return;
+				const batch = albums.close(album.key, album.groupId);
+				if (batch.texts.length === 0) return;
 				try {
 					await submit(
 						album.channelId,
@@ -797,7 +800,7 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 						album.key,
 						album.conversationId,
 						album.user,
-						texts,
+						batch,
 						album.config,
 					);
 				} catch (error) {

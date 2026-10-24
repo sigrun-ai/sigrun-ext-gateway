@@ -18,7 +18,9 @@ export interface ChannelSectionDeps {
 
 export function createChannelSection(deps: ChannelSectionDeps): PromptSection {
 	return section("gateway-channel", async (input) => {
-		const keys = deps.bindings.keysOf(input.conversationId as number);
+		const keys = deps.bindings.keysOf(input.conversationId as number).filter(
+			(key) => deps.bindings.get(key)?.dead !== true,
+		);
 		const first = keys[0];
 		if (first === undefined) return undefined;
 		const binding = deps.bindings.get(first);

@@ -96,6 +96,7 @@ export function createGatewayTools(deps: ToolDeps): readonly ToolRegistration[] 
 					channel: target.channel,
 					chat: target.chat,
 					kind: "notice",
+					tag: `tool:${api.callId}`,
 					message: {
 						chat: target.chat,
 						text: args.text,
@@ -119,6 +120,9 @@ export function createGatewayTools(deps: ToolDeps): readonly ToolRegistration[] 
 					deps.receiptWaitMs ?? RECEIPT_WAIT_MS,
 					context.abortSignal ?? new AbortController().signal,
 				);
+				if (receipt === "failed") {
+					return toolError("Delivery failed; the message was not sent.");
+				}
 				if (receipt === undefined) {
 					return toolSuccess({ delivered: false, queued: true });
 				}
@@ -197,12 +201,12 @@ async function waitForReceipt(
 	entry: LedgerEntry,
 	waitMs: number,
 	signal: AbortSignal,
-): Promise<readonly string[] | undefined> {
+): Promise<readonly string[] | "failed" | undefined> {
 	const deadline = Date.now() + waitMs;
 	while (!signal.aborted) {
 		const current = ledger.list().find((candidate) => candidate.id === entry.id);
 		if (current?.state === "delivered") return current.receipt ?? [];
-		if (current?.state === "failed") return undefined;
+		if (current?.state === "failed") return "failed";
 		if (Date.now() >= deadline) return undefined;
 		await new Promise<void>((resolve) => {
 			const timer = setTimeout(() => {

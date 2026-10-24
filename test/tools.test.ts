@@ -65,7 +65,7 @@ async function rig(media?: readonly ("image" | "audio" | "video" | "document")[]
 		log: LOG,
 		receiptWaitMs: 20,
 	});
-	const api = { conversationId } as ToolExecutionApi;
+	const api = { conversationId, callId: "tool-call-1" } as ToolExecutionApi;
 	const call = async (name: string, args: Record<string, unknown>): Promise<ToolExecutionResult> => {
 		const tool = tools.find((candidate) => candidate.name === name);
 		if (tool === undefined) throw new Error(`missing tool ${name}`);
@@ -118,6 +118,7 @@ describe("send_message", () => {
 		}
 		const entry = ledger.list()[0];
 		expect(entry?.message.files?.[0]?.name).toBe("pixel.png");
+		expect(entry?.tag).toBe("tool:tool-call-1");
 		await ledger.mark(entry!.id, "delivered", ["loop-9"]);
 		const result = await pending;
 		expect(result.isError).toBeUndefined();
@@ -155,6 +156,18 @@ describe("send_message", () => {
 		expect(JSON.parse(output(result))).toEqual({ delivered: false, queued: true });
 		expect(result.isError).toBeUndefined();
 		expect(ledger.list()[0]?.state).toBe("pending");
+	});
+
+	test("a terminal delivery failure returns an error, not a queued result", async () => {
+		const { call, output, ledger } = await rig();
+		const pending = call("send_message", { to: "loop", text: "will fail" });
+		while (ledger.list().length === 0) {
+			await new Promise((resolve) => setTimeout(resolve, 1));
+		}
+		await ledger.mark(ledger.list()[0]!.id, "failed");
+		const result = await pending;
+		expect(result.isError).toBe(true);
+		expect(output(result)).toBe("Delivery failed; the message was not sent.");
 	});
 
 	test("a user with no linked chats gets an explanatory refusal", async () => {

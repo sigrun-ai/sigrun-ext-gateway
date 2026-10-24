@@ -151,7 +151,7 @@ export class DeliveryWorker {
      * Never throws.
      */
     async sendOne(entry) {
-        const message = this.buildMessage(entry);
+        const message = await this.buildMessage(entry);
         try {
             // The attempting mark rides the same isolation as the rest: a
             // failing ledger write is LOGGED and the send does not run (an
@@ -286,10 +286,13 @@ export class DeliveryWorker {
         return "transient";
     }
     /** The send-shaped message for one entry (the recovered marker rule). */
-    buildMessage(entry) {
+    async buildMessage(entry) {
         const text = entry.recovered === true
             ? `${RESENT_MARKER}\n${entry.message.text}`
             : entry.message.text;
+        const files = entry.message.files === undefined || this.deps.resolveFiles === undefined
+            ? undefined
+            : await this.deps.resolveFiles(entry);
         return {
             chat: entry.message.chat,
             text,
@@ -299,9 +302,7 @@ export class DeliveryWorker {
             ...(entry.message.buttons === undefined
                 ? {}
                 : { buttons: entry.message.buttons }),
-            // File bytes resolve at send time (resolveFiles, Task 6's
-            // streaming/interaction entries land later): entries with files
-            // are enqueued by handlers that keep the bytes out of the ledger.
+            ...(files === undefined ? {} : { files }),
         };
     }
 }

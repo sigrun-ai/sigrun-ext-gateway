@@ -6,7 +6,7 @@
 import { section } from "@earendil-works/pi-durable";
 export function createChannelSection(deps) {
     return section("gateway-channel", async (input) => {
-        const keys = deps.bindings.keysOf(input.conversationId);
+        const keys = deps.bindings.keysOf(input.conversationId).filter((key) => deps.bindings.get(key)?.dead !== true);
         const first = keys[0];
         if (first === undefined)
             return undefined;

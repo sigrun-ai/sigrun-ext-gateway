@@ -57,7 +57,7 @@ async function rig(settings: Record<string, unknown> = {}) {
 	const bind = async (conversationId: number, chat: ChatRef): Promise<void> => {
 		await bindings.bind(bindingKey("loop", chat), conversationId, chat);
 	};
-	return { host, section, render, bind };
+	return { host, bindings, section, render, bind };
 }
 
 describe("gateway-channel", () => {
@@ -104,6 +104,20 @@ describe("gateway-channel", () => {
 		expect(await render(1)).toBe(
 			"This conversation is connected to Loop (direct message). Loop renders markdown. (also connected to 1 more)",
 		);
+	});
+
+	test("dead bindings neither lead nor count as additional connected chats", async () => {
+		const { bindings, render, bind } = await rig();
+		await bind(1, { chatId: "100000001", chatType: "dm" });
+		await bind(1, { chatId: "100000002", chatType: "dm" });
+		await bind(1, { chatId: "100000003", chatType: "dm" });
+		await bindings.markDead(bindingKey("loop", { chatId: "100000001", chatType: "dm" }));
+		await bindings.markDead(bindingKey("loop", { chatId: "100000003", chatType: "dm" }));
+		expect(await render(1)).toBe(
+			"This conversation is connected to Loop (direct message). Loop renders markdown.",
+		);
+		await bindings.markDead(bindingKey("loop", { chatId: "100000002", chatType: "dm" }));
+		expect(await render(1)).toBeUndefined();
 	});
 
 	test("returns undefined for an unbound conversation", async () => {

@@ -47,10 +47,10 @@ export async function collectAttachments(
 		try {
 			bytes = await attachment.fetch({ maxBytes, signal });
 		} catch (error) {
-			if (error instanceof Error && error.name === "AttachmentTooLarge") {
+			if (thrownName(error) === "AttachmentTooLarge") {
 				notes.push(TOO_LARGE_NOTE);
 			} else {
-				deps.log.error("attachment fetch failed", error);
+				deps.log.warn(`attachment fetch failed: ${errorMessage(error)}`);
 				notes.push(ATTACHMENT_FAILED_NOTE);
 			}
 			continue;
@@ -77,6 +77,18 @@ export async function collectAttachments(
 		}
 	}
 	return { parts, notes };
+}
+
+/** Match adapter errors by name across realms and non-Error throw shapes. */
+function thrownName(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "name" in error &&
+		typeof error.name === "string"
+		? error.name
+		: undefined;
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }
 
 /** Keep upload names to the host's single-path-segment contract. */

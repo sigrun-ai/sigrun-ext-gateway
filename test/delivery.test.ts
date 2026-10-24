@@ -43,6 +43,7 @@ function silentLog(): import("../src/log.js").EngineLog {
 /** One send recorded by the fake adapter. */
 interface SentMessage {
 	readonly text: string;
+	readonly files?: OutboundMessage["files"];
 }
 
 /** The fake channel adapter: recordable sends, fail modes, hangs. */
@@ -83,7 +84,7 @@ function fakeChannel(over: Partial<ChannelContribution> = {}): FakeChannel {
 				(error as { kind?: string }).kind = kind;
 				throw error;
 			}
-			state.sent.push({ text: message.text });
+			state.sent.push({ text: message.text, files: message.files });
 			return { messageIds: [`loop-${state.sent.length}`] };
 		},
 		classifyError: (error: unknown): "transient" | "permanent" | "chat_gone" => {
@@ -164,7 +165,10 @@ interface Rig {
 	readonly drain: (deadlineMs: number) => Promise<void>;
 }
 
-async function rig(channel: FakeChannel = fakeChannel()): Promise<Rig> {
+async function rig(
+	channel: FakeChannel = fakeChannel(),
+	resolveFiles?: (entry: import("../src/state/ledger.js").LedgerEntry) => Promise<OutboundMessage["files"]>,
+): Promise<Rig> {
 	const dir = await mkdtemp(join(tmpdir(), "sigrun-gw-delivery-"));
 	cleanups.push(() => rm(dir, { recursive: true, force: true }));
 	const clock = virtualClock();
@@ -180,6 +184,7 @@ async function rig(channel: FakeChannel = fakeChannel()): Promise<Rig> {
 		setTimer: clock.setTimer,
 		log: silentLog(),
 		now: clock.now,
+		...(resolveFiles === undefined ? {} : { resolveFiles }),
 	});
 	return {
 		channel,
@@ -212,6 +217,26 @@ describe("DeliveryWorker happy path", () => {
 		harness.worker.kick();
 		await harness.clock.advance(0);
 		expect(harness.channel.sent.map((m) => m.text)).toEqual(["one", "two"]);
+		await harness.worker.stop();
+	});
+
+	test("a file-bearing entry resolves bytes into the adapter send", async () => {
+		const bytes = new Uint8Array([4, 5, 6]);
+		const harness = await rig(fakeChannel(), async (entry) => {
+			expect(entry.message.files?.[0]?.path).toBe("uploads/1/note.txt");
+			return [{ name: "note.txt", mime: "text/plain", bytes }];
+		});
+		const entry = await harness.ledger.enqueue({
+			channel: "loop",
+			chat: CHAT,
+			kind: "notice",
+			message: { chat: CHAT, text: "with file" },
+			files: [{ conversationId: 1, path: "uploads/1/note.txt", name: "note.txt", mime: "text/plain" }],
+		});
+		expect(entry).toBeDefined();
+		harness.worker.kick();
+		await harness.clock.advance(0);
+		expect(harness.channel.sent[0]?.files?.[0]?.bytes).toEqual(bytes);
 		await harness.worker.stop();
 	});
 
