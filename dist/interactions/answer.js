@@ -13,6 +13,9 @@ export async function answerFromChat(deps, answer) {
     const access = await deps.host.access.accessOf({ user: answer.user }, { owner: meta.owner, sharing: meta.sharing });
     if (access !== "write")
         return "You do not have write access to this conversation.";
+    // Terminal-snapshot invariant: secret-bearing records are webui-plan,
+    // so no chat answer reaches this consuming read. Widening the planner
+    // requires a non-consuming snapshot before any terminal path reads one.
     const record = await deps.host.snapshotInteraction(answer.conversationId, answer.callId, deps.context ?? { abortSignal: new AbortController().signal });
     if (record !== undefined && TERMINAL.has(record.status)) {
         return `Already ${outcomeOf(record)}.`;
@@ -48,10 +51,23 @@ export function summarizeValues(values) {
 export function createInteractionAnswerStage(deps) {
     return async (channelId, event) => {
         const key = bindingKey(channelId, event.chat);
+        const config = await deps.configOf?.(channelId);
+        const user = config === undefined
+            ? deps.identities.linkedUserOf(channelId, event.sender.id)
+            : deps.identities.userFor(config, channelId, event.sender.id)?.user;
+        const lookupKeys = user === undefined ? [key] : [key, `user:${user}`];
+        const lookup = (read) => {
+            for (const candidate of lookupKeys) {
+                const found = read(candidate);
+                if (found !== undefined)
+                    return found;
+            }
+            return undefined;
+        };
         let prompt;
         const replyTarget = event.replyTo?.messageId;
         if (replyTarget !== undefined) {
-            const replied = deps.prompts.byReplyTo(key, replyTarget);
+            const replied = lookup((candidate) => deps.prompts.byReplyTo(candidate, replyTarget));
             if (replied?.plan.kind === "text") {
                 prompt = {
                     conversationId: replied.conversationId,
@@ -61,8 +77,11 @@ export function createInteractionAnswerStage(deps) {
             }
         }
         if (prompt === undefined && /^\d+$/.test(event.text.trim())) {
-            const pending = deps.prompts.pendingInChat(key);
-            if (pending.length === 1 && pending[0].plan.kind === "choice") {
+            const pending = lookup((candidate) => {
+                const rows = deps.prompts.pendingInChat(candidate);
+                return rows.length === 0 ? undefined : rows;
+            });
+            if (pending?.length === 1) {
                 const selected = pending[0];
                 const plan = selected.plan;
                 if (plan.kind !== "choice")
@@ -70,8 +89,10 @@ export function createInteractionAnswerStage(deps) {
                 const index = Number(event.text.trim()) - 1;
                 const options = [...plan.options].sort((a, b) => Number(b.recommended === true) - Number(a.recommended === true));
                 const option = options[index];
-                if (option === undefined)
+                if (option === undefined) {
+                    await deps.reply?.(event, `Answer number out of range (1-${options.length}).`);
                     return { outcome: "command" };
+                }
                 prompt = {
                     conversationId: selected.conversationId,
                     callId: selected.callId,
@@ -81,10 +102,6 @@ export function createInteractionAnswerStage(deps) {
         }
         if (prompt === undefined)
             return undefined;
-        const config = await deps.configOf?.(channelId);
-        const user = config === undefined
-            ? deps.identities.linkedUserOf(channelId, event.sender.id)
-            : deps.identities.userFor(config, channelId, event.sender.id)?.user;
         const reply = await answerFromChat(deps, { ...prompt, user });
         await deps.reply?.(event, reply);
         return { outcome: "command" };

@@ -36,3 +36,4 @@ export declare function renderInteraction(record: InteractionRecord, caps: Chann
     text: string;
     buttons?: OutboundMessage["buttons"];
 };
+export declare function truncateInteractionText(text: string, max: number): string;

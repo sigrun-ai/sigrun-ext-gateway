@@ -435,6 +435,39 @@ describe("DeliveryWorker recovered entries", () => {
 	});
 });
 
+describe("DeliveryWorker edit entries", () => {
+	test("a missing edit precondition is permanent, not a transient retry", async () => {
+		const harness = await rig();
+		await harness.ledger.enqueue({
+			channel: "loop", bindingKey: KEY, chat: CHAT, kind: "edit",
+			ref: { chat: CHAT, messageId: "loop-1" },
+			message: { chat: CHAT, text: "outcome" },
+		});
+		harness.worker.kick();
+		await harness.clock.advance(0);
+		expect(harness.ledger.list()[0]?.state).toBe("failed");
+		expect(harness.ledger.list()[0]?.attempts).toBe(1);
+		await harness.worker.stop();
+	});
+
+	test("a recovered edit keeps its outcome text and carries no resend prefix", async () => {
+		const harness = await rig();
+		const edits: OutboundMessage[] = [];
+		harness.channel.edit = async (_ref, message) => { edits.push(message); };
+		const entry = await harness.ledger.enqueue({
+			channel: "loop", bindingKey: KEY, chat: CHAT, kind: "edit",
+			ref: { chat: CHAT, messageId: "loop-1" },
+			message: { chat: CHAT, text: "answered: allow" },
+		});
+		await harness.ledger.mark(entry!.id, "attempting");
+		await harness.ledger.recoverAfterRestart();
+		harness.worker.kick();
+		await harness.clock.advance(0);
+		expect(edits.map((message) => message.text)).toEqual(["answered: allow"]);
+		await harness.worker.stop();
+	});
+});
+
 describe("DeliveryWorker drain ownership (review fix 3)", () => {
 	test("drain takes the queue: a kick during a drain is a no-op (no second loop)", async () => {
 		const harness = await rig();

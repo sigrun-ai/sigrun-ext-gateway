@@ -244,7 +244,9 @@ export class DeliveryWorker {
 		message: OutboundMessage,
 	): Promise<{ messageIds: readonly string[] }> {
 		if (entry.ref === undefined || this.channel.edit === undefined) {
-			throw new Error("gateway: edit delivery requires a ref and adapter edit()");
+			const error = new Error("gateway: edit delivery requires a ref and adapter edit()");
+			error.name = EDIT_PRECONDITION_ERROR;
+			throw error;
 		}
 		await new Promise<void>((resolve, reject) => {
 			let settled = false;
@@ -372,7 +374,7 @@ export class DeliveryWorker {
 	 * transient otherwise) with the timeout error forced transient.
 	 */
 	private classify(error: unknown): "transient" | "permanent" | "chat_gone" {
-		if (error instanceof Error && error.name === FILE_RESOLUTION_ERROR) {
+		if (error instanceof Error && (error.name === FILE_RESOLUTION_ERROR || error.name === EDIT_PRECONDITION_ERROR)) {
 			return "permanent";
 		}
 		if (
@@ -391,8 +393,10 @@ export class DeliveryWorker {
 
 	/** The send-shaped message for one entry (the recovered marker rule). */
 	private async buildMessage(entry: LedgerEntry): Promise<OutboundMessage> {
+		// An edit replaces its target; adding a resend prefix would corrupt
+		// the already-final outcome text (the marker belongs on fresh sends).
 		const text =
-			entry.recovered === true
+			entry.recovered === true && entry.kind !== "edit"
 				? `${RESENT_MARKER}\n${entry.message.text}`
 				: entry.message.text;
 		let files: OutboundMessage["files"];
@@ -425,6 +429,9 @@ export class DeliveryWorker {
 
 /** A workspace file no longer exists/readable; retrying cannot repair it. */
 const FILE_RESOLUTION_ERROR = "GatewayFileResolutionError";
+
+/** A structurally undeliverable edit can never succeed on retry. */
+const EDIT_PRECONDITION_ERROR = "GatewayEditPreconditionError";
 
 /** The timeout error's name (matched by `classify`, never instanceof). */
 export const SEND_TIMEOUT_NAME = "GatewaySendTimeout";

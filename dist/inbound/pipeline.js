@@ -531,10 +531,14 @@ export function createPipeline(deps) {
         if (action.kind === "interaction") {
             if (deps.interactionAnswer === undefined)
                 return;
+            if (action.field === undefined) {
+                deps.log.error("interaction token has no field; refusing to invent one");
+                return;
+            }
             const reply = await deps.interactionAnswer({
                 conversationId: action.conversationId,
                 callId: action.callId,
-                values: { [action.field ?? "decision"]: action.optionId },
+                values: { [action.field]: action.optionId },
                 user: tapper?.user,
             });
             await sendNotice(event.chat, reply, undefined);

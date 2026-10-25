@@ -19,7 +19,7 @@ import type { ButtonTokens } from "../inbound/tokens.js";
 import type { EngineLog } from "../log.js";
 import type { PromptStore } from "./prompts.js";
 import { outcomeOf, summarizeValues, type AnswerDeps } from "./answer.js";
-import { planInteraction, renderInteraction } from "./render.js";
+import { planInteraction, renderInteraction, truncateInteractionText } from "./render.js";
 
 export interface InteractionChatDeps extends AnswerDeps {
 	readonly ledger: Ledger;
@@ -48,13 +48,6 @@ async function notifyInteraction(
 	event: NotificationEvent & { conversationId: number; callId: string },
 	deps: InteractionChatDeps,
 ): Promise<void> {
-	const context = deps.context ?? { abortSignal: new AbortController().signal };
-	const record = await deps.host.snapshotInteraction(
-		event.conversationId as ConversationId,
-		event.callId,
-		context,
-	);
-	if (record === undefined || record.status !== "pending") return;
 	const keys = deps.bindings.keysOf(event.conversationId);
 	const targets: { key: string; channel: string; chat: import("@sigrun/sigrun/extension").ChatRef; bindingKey?: string }[] = [];
 	if (keys.length > 0) {
@@ -68,8 +61,21 @@ async function notifyInteraction(
 			targets.push({ key: `user:${event.user}`, channel: home.channel, chat: home.chat });
 		}
 	}
-	for (const target of targets) {
-		if (deps.prompts.has(event.conversationId, event.callId, target.key)) continue;
+	// Resolve and dedupe targets BEFORE reading the record. snapshotInteraction
+	// consumes a settled secret's one-shot delivery, even when we then return.
+	// Final-review follow-up: core should offer a non-consuming snapshot read.
+	const pendingTargets = targets.filter((target) =>
+		!deps.prompts.has(event.conversationId, event.callId, target.key)
+	);
+	if (pendingTargets.length === 0) return;
+	const context = deps.context ?? { abortSignal: new AbortController().signal };
+	const record = await deps.host.snapshotInteraction(
+		event.conversationId as ConversationId,
+		event.callId,
+		context,
+	);
+	if (record === undefined || record.status !== "pending") return;
+	for (const target of pendingTargets) {
 		const channel = deps.channelOf(target.channel);
 		if (channel === undefined) {
 			deps.log.warn(`interaction prompt skipped: no channel "${target.channel}"`);
@@ -128,12 +134,17 @@ export async function onInteractionSettled(
 			const channel = id === undefined ? undefined : deps.channelOf(id);
 			if (channel?.capabilities.edit !== undefined && channel.edit !== undefined && ref.messageId !== "") {
 				editableChannels.add(channel.id);
+				const bindingKey = deps.bindings.keysOf(event.conversationId as number).find((key) => {
+					const binding = deps.bindings.get(key);
+					return binding?.chat.chatId === ref.chat.chatId && binding.chat.threadId === ref.chat.threadId;
+				});
 				await deps.ledger.enqueue({
 					channel: channel.id,
+					...(bindingKey === undefined ? {} : { bindingKey }),
 					chat: ref.chat,
 					kind: "edit",
 					ref,
-					message: { chat: ref.chat, text: `Interaction ${outcome}.` },
+					message: { chat: ref.chat, text: truncateInteractionText(`Interaction ${outcome}.`, channel.capabilities.maxMessageLength) },
 					tag: `interaction-settled:${event.conversationId}:${event.callId}:${channel.id}:${ref.messageId}`,
 				});
 			}

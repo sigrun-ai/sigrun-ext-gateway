@@ -217,7 +217,9 @@ export class DeliveryWorker {
     /** Apply an edit entry; its ledger row carries the target MessageRef. */
     async boundedEdit(entry, message) {
         if (entry.ref === undefined || this.channel.edit === undefined) {
-            throw new Error("gateway: edit delivery requires a ref and adapter edit()");
+            const error = new Error("gateway: edit delivery requires a ref and adapter edit()");
+            error.name = EDIT_PRECONDITION_ERROR;
+            throw error;
         }
         await new Promise((resolve, reject) => {
             let settled = false;
@@ -322,7 +324,7 @@ export class DeliveryWorker {
      * transient otherwise) with the timeout error forced transient.
      */
     classify(error) {
-        if (error instanceof Error && error.name === FILE_RESOLUTION_ERROR) {
+        if (error instanceof Error && (error.name === FILE_RESOLUTION_ERROR || error.name === EDIT_PRECONDITION_ERROR)) {
             return "permanent";
         }
         if (error instanceof Error &&
@@ -338,7 +340,9 @@ export class DeliveryWorker {
     }
     /** The send-shaped message for one entry (the recovered marker rule). */
     async buildMessage(entry) {
-        const text = entry.recovered === true
+        // An edit replaces its target; adding a resend prefix would corrupt
+        // the already-final outcome text (the marker belongs on fresh sends).
+        const text = entry.recovered === true && entry.kind !== "edit"
             ? `${RESENT_MARKER}\n${entry.message.text}`
             : entry.message.text;
         let files;
@@ -371,6 +375,8 @@ export class DeliveryWorker {
 }
 /** A workspace file no longer exists/readable; retrying cannot repair it. */
 const FILE_RESOLUTION_ERROR = "GatewayFileResolutionError";
+/** A structurally undeliverable edit can never succeed on retry. */
+const EDIT_PRECONDITION_ERROR = "GatewayEditPreconditionError";
 /** The timeout error's name (matched by `classify`, never instanceof). */
 export const SEND_TIMEOUT_NAME = "GatewaySendTimeout";
 /** Build the timeout error. */

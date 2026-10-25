@@ -349,6 +349,26 @@ describe("prompt delivery and answering", () => {
 		expect(r.prompts.has(7, "call-1", KEY)).toBe(true);
 	});
 
+	test("a late settled notification never consumes the winner's secret delivery", async () => {
+		const r = await rig();
+		const secret = form([{ type: "secret", name: "token", label: "Token" }]);
+		await seedPending(r.host, 7, "call-secret", secret);
+		await r.host.answerInteraction(7 as never, "call-secret", { values: { token: "synthetic-secret" } }, CONTEXT, { user: "alice" });
+		// The late notifier must not read (and consume) the settled record.
+		await promptOne(r, "alice", 7, "call-secret");
+		expect(r.host.interactions.get("7:call-secret")?.status).toBe("answered");
+		expect(r.host.calls.filter((call) => call.method === "snapshotInteraction")).toHaveLength(1);
+		expect(r.host.calls.filter((call) => call.method === "snapshotInteraction")[0]?.args[1]).toBe("call-secret");
+	});
+
+	test("a late settled notification with an already prompted target does not read the record", async () => {
+		const r = await rig();
+		await r.prompts.record(7, "call-secret", "user:alice", { chat: CHAT, messageId: "loop-1" }, { kind: "webui" });
+		await r.host.seedInteraction(7 as never, record(form([{ type: "secret", name: "token", label: "Token" }]), { callId: "call-secret" }), CONTEXT);
+		await promptOne(r, "alice", 7, "call-secret");
+		expect(r.host.calls.filter((call) => call.method === "snapshotInteraction")).toHaveLength(0);
+	});
+
 	test("a button tap answers allow; a later tap replies with the outcome", async () => {
 		const r = await rig();
 		await seedPending(r.host);
@@ -398,6 +418,31 @@ describe("prompt delivery and answering", () => {
 		expect(await stage("loop", { ...event, messageId: "m2" })).toBeUndefined();
 	});
 
+	test("an unbound home prompt accepts a numbered answer and an out-of-range reply", async () => {
+		const r = await rig();
+		const replies: string[] = [];
+		const stage = createInteractionAnswerStage({ ...r.deps, reply: async (_event, text) => { replies.push(text); } });
+		await r.prompts.record(7, "call-home", "user:alice", { chat: CHAT, messageId: "loop-1" }, planInteraction(record(GATE), caps()));
+		await r.host.seedInteraction(7 as never, record(GATE, { callId: "call-home" }), CONTEXT);
+		// The home chat has since bound to its own conversation; recipient
+		// fallback must still find the unbound prompt.
+		await r.bindings.bind(KEY, 99, CHAT);
+		expect(await stage("loop", { messageId: "m0", chat: CHAT, sender: { id: "100000001" }, text: "3" })).toEqual({ outcome: "command" });
+		expect(replies[0]).toContain("out of range");
+		expect(await stage("loop", { messageId: "m1", chat: CHAT, sender: { id: "100000001" }, text: "1" })).toEqual({ outcome: "command" });
+		expect(r.host.interactions.get("7:call-home")?.answer?.values).toEqual({ decision: "allow" });
+	});
+
+	test("an unbound home text prompt accepts a reply-to answer", async () => {
+		const r = await rig();
+		const stage = createInteractionAnswerStage(r.deps);
+		await r.prompts.record(7, "call-home-text", "user:alice", { chat: CHAT, messageId: "loop-1" }, { kind: "text", field: "reason" });
+		await r.host.seedInteraction(7 as never, record(form([{ type: "longtext", name: "reason", label: "Reason" }]), { callId: "call-home-text" }), CONTEXT);
+		await r.bindings.bind(KEY, 99, CHAT);
+		expect(await stage("loop", { messageId: "m1", chat: CHAT, sender: { id: "100000001" }, text: "safe", replyTo: { messageId: "loop-1" } })).toEqual({ outcome: "command" });
+		expect(r.host.interactions.get("7:call-home-text")?.answer?.values).toEqual({ reason: "safe" });
+	});
+
 	test("a reply-to on a text prompt answers the field with the reply text", async () => {
 		const r = await rig();
 		const tree = form([{ type: "longtext", name: "reason", label: "Reason" }]);
@@ -435,6 +480,17 @@ describe("prompt delivery and answering", () => {
 		await pipeline.action("loop", action, r.config);
 		expect(r.host.interactions.get("7:call-1")?.status).toBe("answered");
 		expect(r.channel.sent.at(-1)?.text).toContain("Answered");
+	});
+
+	test("settlement edits clamp and carry the bound key for chat-gone handling", async () => {
+		const r = await rig();
+		await r.bindings.bind(KEY, 7, CHAT);
+		await r.prompts.record(7, "call-long", KEY, { chat: CHAT, messageId: "loop-1" }, { kind: "webui" });
+		await onInteractionSettled({ conversationId: 7 as never, callId: "call-long", kind: "gate.ask", status: "answered", answer: { reason: "x".repeat(500) } }, r.deps, CONTEXT);
+		const entry = r.ledger.list().find((candidate) => candidate.kind === "edit");
+		expect(entry?.bindingKey).toBe(KEY);
+		expect(entry?.message.text.length).toBeLessThanOrEqual(200);
+		expect(entry?.message.text).toContain("full details in the webui");
 	});
 
 	test("settlement edits every prompt and removes buttons; a later tap reads the outcome", async () => {

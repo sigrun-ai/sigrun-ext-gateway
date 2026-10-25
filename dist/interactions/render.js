@@ -89,7 +89,7 @@ export function renderInteraction(record, caps, opts) {
     // runs so native/plain channels get the same §8.6 treatment as finals.
     const formatted = renderChunks(lines.join("\n"), caps).join("\n");
     return {
-        text: truncateWithNote(formatted, caps.maxMessageLength),
+        text: truncateInteractionText(formatted, caps.maxMessageLength),
         ...(buttons === undefined ? {} : { buttons }),
     };
 }
@@ -111,7 +111,7 @@ function truncateLabel(label, max) {
     const text = typeof label === "string" ? label : "";
     return max === undefined ? text : text.slice(0, Math.max(0, max));
 }
-function truncateWithNote(text, max) {
+export function truncateInteractionText(text, max) {
     const limit = Math.max(1, max);
     if (text.length <= limit)
         return text;
