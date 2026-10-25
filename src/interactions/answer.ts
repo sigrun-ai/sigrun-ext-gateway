@@ -63,12 +63,11 @@ export async function answerFromChat(
 		{ user: answer.user },
 	);
 	if (!answered) {
-		const latest = await deps.host.snapshotInteraction(
-			answer.conversationId as ConversationId,
-			answer.callId,
-			deps.context ?? { abortSignal: new AbortController().signal },
-		);
-		return latest === undefined ? "That interaction is no longer available." : `Already ${outcomeOf(latest)}.`;
+		// A lost race: someone else's answer won. NEVER snapshotInteraction
+		// here — that read takes the WINNER's one-shot secret delivery
+		// (Review Focus 4: the delivery belongs to the winner's extension
+		// read; a losing path consuming it would destroy the secret).
+		return "Already answered.";
 	}
 	return `Answered: ${summarizeValues(answer.values)}.`;
 }
@@ -86,7 +85,7 @@ export function outcomeOf(record: {
 	return `${record.status}${who}`;
 }
 
-function summarizeValues(values: Readonly<Record<string, JsonValue>>): string {
+export function summarizeValues(values: Readonly<Record<string, JsonValue>>): string {
 	const parts = Object.entries(values).map(([field, value]) => {
 		const rendered = typeof value === "string" ? value : JSON.stringify(value);
 		return `${field}=${rendered ?? "null"}`;

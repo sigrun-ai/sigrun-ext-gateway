@@ -33,6 +33,7 @@ export declare function outcomeOf(record: {
     };
     readonly answeredByUser?: string;
 }): string;
+export declare function summarizeValues(values: Readonly<Record<string, JsonValue>>): string;
 /** Stage 8: consume a numbered or reply-to answer, else continue admission. */
 export declare function createInteractionAnswerStage(deps: AnswerDeps & {
     readonly configOf?: (channel: string) => Promise<import("../config.js").ChannelConfig | undefined>;

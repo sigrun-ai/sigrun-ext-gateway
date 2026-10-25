@@ -445,7 +445,7 @@ describe("prompt delivery and answering", () => {
 		const ref = { chat: CHAT, messageId: "loop-1" } as const;
 		expect(r.prompts.refsOf(7, "call-1")).toEqual([ref]);
 		await r.host.answerInteraction(7 as never, "call-1", { values: { decision: "allow" } }, CONTEXT, { user: "bob" });
-		await onInteractionSettled({ conversationId: 7 as never, callId: "call-1", kind: "gate.ask", status: "answered" }, r.deps, CONTEXT);
+		await onInteractionSettled({ conversationId: 7 as never, callId: "call-1", kind: "gate.ask", status: "answered", answeredByUser: "bob", answer: { decision: "allow" } }, r.deps, CONTEXT);
 		await r.deliver();
 		expect(r.channel.edits).toHaveLength(1);
 		expect(r.channel.edits[0]?.ref).toEqual(ref);

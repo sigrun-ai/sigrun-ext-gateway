@@ -3,7 +3,7 @@
  * durable ledger entries; delivery receipts populate PromptStore refs so
  * settlement can edit the exact platform messages.
  */
-import { outcomeOf } from "./answer.js";
+import { summarizeValues } from "./answer.js";
 import { planInteraction, renderInteraction } from "./render.js";
 /** The gateway notifier: interaction.pending plus the ordinary home notifier. */
 export function createInteractionNotifier(deps) {
@@ -74,8 +74,20 @@ async function notifyInteraction(event, deps) {
 /** Enqueue outcome edits/notices and retire numbered/reply-to matching. */
 export async function onInteractionSettled(event, deps, context) {
     try {
-        const record = await deps.host.snapshotInteraction(event.conversationId, event.callId, context);
-        const outcome = record === undefined ? event.status : outcomeOf(record);
+        // NEVER snapshotInteraction here: that read is the one-shot SECRET
+        // delivery (it merges the true values back once, then deletes the
+        // entry) — an outcome edit that consumed it would silently destroy
+        // the extension's only chance to receive the secret. The widened C6
+        // event carries everything chat rendering needs (the stored answer
+        // is masked by construction — secrets never persist).
+        const who = event.answeredByUser === undefined ? "" : ` by ${event.answeredByUser}`;
+        // SAFETY: the stored answer's values are validated JsonValue (the
+        // record's answer shape); the payload types them loosely because
+        // the contract cannot import the json module's runtime shape.
+        const answerValues = (event.answer ?? {});
+        const outcome = event.status === "answered"
+            ? `answered${who}: ${summarizeValues(answerValues)}`
+            : `${event.status}${who}`;
         const editableChannels = new Set();
         const refs = deps.prompts.refsOf(event.conversationId, event.callId);
         for (const ref of refs) {

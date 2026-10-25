@@ -18,7 +18,7 @@ import type { Ledger } from "../state/ledger.js";
 import type { ButtonTokens } from "../inbound/tokens.js";
 import type { EngineLog } from "../log.js";
 import type { PromptStore } from "./prompts.js";
-import { outcomeOf, type AnswerDeps } from "./answer.js";
+import { outcomeOf, summarizeValues, type AnswerDeps } from "./answer.js";
 import { planInteraction, renderInteraction } from "./render.js";
 
 export interface InteractionChatDeps extends AnswerDeps {
@@ -103,8 +103,24 @@ export async function onInteractionSettled(
 	context: HandlerContext,
 ): Promise<void> {
 	try {
-		const record = await deps.host.snapshotInteraction(event.conversationId, event.callId, context);
-		const outcome = record === undefined ? event.status : outcomeOf(record);
+		// NEVER snapshotInteraction here: that read is the one-shot SECRET
+		// delivery (it merges the true values back once, then deletes the
+		// entry) — an outcome edit that consumed it would silently destroy
+		// the extension's only chance to receive the secret. The widened C6
+		// event carries everything chat rendering needs (the stored answer
+		// is masked by construction — secrets never persist).
+		const who =
+			event.answeredByUser === undefined ? "" : ` by ${event.answeredByUser}`;
+		// SAFETY: the stored answer's values are validated JsonValue (the
+		// record's answer shape); the payload types them loosely because
+		// the contract cannot import the json module's runtime shape.
+		const answerValues = (event.answer ?? {}) as Parameters<
+			typeof summarizeValues
+		>[0];
+		const outcome =
+			event.status === "answered"
+				? `answered${who}: ${summarizeValues(answerValues)}`
+				: `${event.status}${who}`;
 		const editableChannels = new Set<string>();
 		const refs = deps.prompts.refsOf(event.conversationId as number, event.callId);
 		for (const ref of refs) {
