@@ -361,11 +361,14 @@ describe("prompt delivery and answering", () => {
 		const secret = form([{ type: "secret", name: "token", label: "Token" }]);
 		await seedPending(r.host, 7, "call-secret", secret);
 		await r.host.answerInteraction(7 as never, "call-secret", { values: { token: "synthetic-secret" } }, CONTEXT, { user: "alice" });
-		// The late notifier must not read (and consume) the settled record.
+		// The late notifier performs exactly ONE record read (a prompt is
+		// needed: no prior prompt row), does not re-prompt (the pending
+		// check returns before any enqueue), and never reads again.
 		await promptOne(r, "alice", 7, "call-secret");
 		expect(r.host.interactions.get("7:call-secret")?.status).toBe("answered");
 		expect(r.host.calls.filter((call) => call.method === "snapshotInteraction")).toHaveLength(1);
 		expect(r.host.calls.filter((call) => call.method === "snapshotInteraction")[0]?.args[1]).toBe("call-secret");
+		expect(r.channel.sent.length).toBe(0);
 	});
 
 	test("a late settled notification with an already prompted target does not read the record", async () => {
