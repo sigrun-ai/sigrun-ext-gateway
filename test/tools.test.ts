@@ -52,7 +52,7 @@ async function rig(media?: readonly ("image" | "audio" | "video" | "document")[]
 	});
 	const conversationId = await host.conversations.create({ owner: "alice" });
 	const bindings = new BindingStore(join(dir, "bindings.json"));
-	const identities = new IdentityStore(join(dir, "identities.json"));
+	const identities = new IdentityStore(host, join(dir, "identities.json"));
 	await identities.link("loop", "100000001", "alice", "pairing", HOME);
 	const ledger = new Ledger(join(dir, "ledger.json"));
 	const tools = createGatewayTools({
@@ -172,7 +172,7 @@ describe("send_message", () => {
 
 	test("a user with no linked chats gets an explanatory refusal", async () => {
 		const { host, bindings, identities, ledger, call, output } = await rig();
-		await identities.unlinkUser("alice");
+		await identities.forgetHomes("alice");
 		const result = await call("send_message", { to: "loop", text: "hello" });
 		expect(result.isError).toBe(true);
 		expect(output(result)).toContain("no linked chats");

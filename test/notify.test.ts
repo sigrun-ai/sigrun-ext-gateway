@@ -45,7 +45,7 @@ async function rig(): Promise<Rig> {
 	cleanups.push(() => rm(dir, { recursive: true, force: true }));
 	const host = await createFakeHost({ storesDir: dir, users: [{ user: "alice" }] });
 	const bindings = new BindingStore(join(dir, "bindings.json"));
-	const identities = new IdentityStore(join(dir, "identities.json"));
+	const identities = new IdentityStore(host, join(dir, "identities.json"));
 	await identities.link(
 		"loop",
 		"100000001",

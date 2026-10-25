@@ -88,7 +88,7 @@ async function rig(owner = "alice"): Promise<Rig> {
 		},
 	};
 	const bindings = new BindingStore(join(dir, "bindings.json"));
-	const identities = new IdentityStore(join(dir, "identities.json"));
+	const identities = new IdentityStore(host, join(dir, "identities.json"));
 	const pairing = new PairingStore(join(dir, "pairing.json"));
 	const linkCodes = new LinkCodes();
 	const conversationId = (await host.conversations.create({
@@ -327,7 +327,7 @@ describe("chat command behaviors", () => {
 		const code = harness.deps.linkCodes.issue("alice", "loop", 1_000);
 		expect(await harness.run(`/link ${code}`)).toBe("command");
 		expect(harness.sent.at(-1)?.text).toBe("Self-linking is disabled on this channel.");
-		expect(harness.identities.linkedUserOf("loop", "100000001")).toBeUndefined();
+		expect(await harness.host.accounts.lookup("chat:loop", "100000001")).toBeUndefined();
 		expect(harness.deps.linkCodes.peek(code, "loop", 1_000)).toBe("alice");
 	});
 

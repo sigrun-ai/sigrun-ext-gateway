@@ -133,7 +133,7 @@ async function rig(): Promise<Rig> {
 	const bindings = new BindingStore(join(dir, "bindings.json"), {
 		now: () => 1000,
 	});
-	const identities = new IdentityStore(join(dir, "identities.json"));
+	const identities = new IdentityStore(host, join(dir, "identities.json"));
 	// The DM link the access re-check reads (chat 100000001 → alice).
 	await identities.link("loop", "100000001", "alice", "pairing", CHAT);
 	const ledger = new Ledger(join(dir, "ledger.json"), { now: () => 1000 });
@@ -345,7 +345,7 @@ describe("onRunSettled: access re-check (M7)", () => {
 			owner: "alice",
 		})) as number;
 		await harness.bindings.bind(KEY, conversationId, CHAT);
-		await harness.identities.unlinkUser("alice");
+		await harness.host.accounts.unlink("chat:loop", "100000001");
 		const deps: SettledDeps = {
 			...harness.deps,
 			// The channel config exists but has no mapping for the DM.
@@ -372,7 +372,7 @@ describe("onRunSettled: access re-check (M7)", () => {
 		await bindings.bind(KEY, conversationId as number, CHAT);
 		const ledger = new Ledger(join(dir, "ledger.json"), { now: () => 1000 });
 		const channel = fakeChannel();
-		const identities = new IdentityStore(join(dir, "identities.json"));
+		const identities = new IdentityStore(host, join(dir, "identities.json"));
 		// The DM link the access re-check reads (chat 100000001 → alice).
 		await identities.link("loop", "100000001", "alice", "pairing", CHAT);
 		const deps: SettledDeps = {
@@ -538,8 +538,9 @@ describe("onRunSettled: the streaming hand-off", () => {
 		const otherKey = bindingKey("loop", otherChat);
 		await harness.bindings.bind(KEY, 7, CHAT);
 		await harness.bindings.bind(otherKey, 7, otherChat);
-		// The other chat's DM resolves to bob (a second directory user).
-		await harness.identities.link("loop", "200000002", "bob", "pairing", otherChat);
+		// This assertion exercises the allowlist path for both DMs, so no
+		// account link is needed for the otherwise unknown synthetic bob.
+
 		const deps: SettledDeps = {
 			...harness.deps,
 			configOf: async () => {

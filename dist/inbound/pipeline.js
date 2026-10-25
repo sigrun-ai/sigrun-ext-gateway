@@ -45,9 +45,9 @@ const UNSERVED_MODEL_NOTICE = "The model <ref> is not available. Use /model to p
 /** The pinned group refusal for `/link` (spec §8.2, exact copy). */
 const LINK_GROUP_REFUSAL = "send this in a direct message";
 /** Build a private access state over `stateDir` (the no-`access` shape). */
-function privateAccess(stateDir, now) {
+function privateAccess(host, stateDir, now) {
     return {
-        identities: new IdentityStore(join(stateDir, "identities.json")),
+        identities: new IdentityStore(host, join(stateDir, "identities.json")),
         pairing: new PairingStore(join(stateDir, "pairing.json"), { now }),
         linkCodes: new LinkCodes(),
         tokens: new ButtonTokens(),
@@ -64,7 +64,7 @@ export function createPipeline(deps) {
         new BindingStore(join(deps.stateDir, "bindings.json"), { now });
     const seen = new SeenSet(join(deps.stateDir, "seen.json"));
     const access = deps.access ??
-        privateAccess(deps.stateDir, () => now());
+        privateAccess(deps.host, deps.stateDir, () => now());
     const albums = new AlbumCollector(now, ALBUM_WINDOW_MS);
     // Per-group close timers (the album window's flush).
     const albumTimers = new Map();
@@ -145,7 +145,7 @@ export function createPipeline(deps) {
         let group;
         let senderLabel = event.sender.name ?? event.sender.id;
         if (event.chat.chatType !== "dm") {
-            const admission = admitGroupEvent(config, channelId, event, access.identities);
+            const admission = await admitGroupEvent(config, channelId, event, access.identities);
             if (!admission.admit) {
                 if (admission.reason === "unlisted" || admission.reason === "failed") {
                     deps.log.once(`group-${admission.reason}:${channelId}:${event.chat.chatId}`, "warn", `group message dropped (${admission.reason}, channel "${channelId}")`);
@@ -171,7 +171,7 @@ export function createPipeline(deps) {
             }
         }
         else {
-            const resolved = access.identities.userFor(config, channelId, event.sender.id);
+            const resolved = await access.identities.userFor(config, channelId, event.sender.id);
             if (resolved === undefined) {
                 return await unknownDm(channelId, event, config);
             }
@@ -527,7 +527,7 @@ export function createPipeline(deps) {
         const action = access.tokens.resolve(event.data);
         if (action === undefined)
             return;
-        const tapper = access.identities.userFor(config, channelId, event.sender.id);
+        const tapper = await access.identities.userFor(config, channelId, event.sender.id);
         if (action.kind === "interaction") {
             if (deps.interactionAnswer === undefined)
                 return;

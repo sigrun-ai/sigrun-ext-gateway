@@ -63,7 +63,7 @@ describe("resolveTargets", () => {
 			storesDir: dir,
 			users: [{ user: "alice" }, { user: "bob" }],
 		});
-		const identities = new IdentityStore(join(dir, "identities.json"));
+		const identities = new IdentityStore(host, join(dir, "identities.json"));
 		await identities.link("loop", "100000001", "alice", "pairing", HOME);
 		return {
 			host,
@@ -175,7 +175,7 @@ describe("job delivery at run settle", () => {
 			deliver: [...deliver],
 		});
 		const bindings = new BindingStore(join(dir, "bindings.json"));
-		const identities = new IdentityStore(join(dir, "identities.json"));
+		const identities = new IdentityStore(host, join(dir, "identities.json"));
 		await identities.link("loop", "100000001", "alice", "pairing", HOME);
 		const ledger = new Ledger(join(dir, "ledger.json"));
 		const warnings: string[] = [];
@@ -265,7 +265,7 @@ describe("job delivery at run settle", () => {
 			deliver: ["loop"],
 		});
 		const bindings = new BindingStore(join(dir, "bindings.json"));
-		const identities = new IdentityStore(join(dir, "identities.json"));
+		const identities = new IdentityStore(host, join(dir, "identities.json"));
 		await identities.link("loop", "100000001", "alice", "pairing", HOME);
 		const ledger = new Ledger(join(dir, "ledger.json"));
 		const log: EngineLog = {

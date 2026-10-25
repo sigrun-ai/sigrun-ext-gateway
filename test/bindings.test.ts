@@ -1,7 +1,7 @@
 /**
- * BindingStore + SeenSet + IdentityStore (Task 3, spec §8.2/§8.3): the
- * binding-key shapes, the seen set's in-flight/committed semantics (the
- * pipeline's Review Focus 1), and the identity allow-vs-link resolution.
+ * BindingStore + SeenSet (Task 3, spec §8.2/§8.3): the
+ * binding-key shapes and the seen set's in-flight/committed semantics
+ * (the pipeline's Review Focus 1). IdentityStore has its own suite.
  *
  * Tests own their literals: alice/bob, synthetic sender ids
  * ("100000001"), no real tokens.
@@ -12,10 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import type { ChatRef } from "@sigrun/sigrun/extension";
-import { parseGatewayConfig } from "../src/config.js";
 import { BindingStore, bindingKey } from "../src/state/bindings.js";
 import { SeenSet } from "../src/state/seen.js";
-import { IdentityStore } from "../src/state/identities.js";
 
 const dm: ChatRef = { chatId: "100000001", chatType: "dm" };
 const group: ChatRef = { chatId: "-100000000002", chatType: "group" };
@@ -165,105 +163,5 @@ describe("SeenSet", () => {
 		await first.commit("persist-id", 0);
 		const second = new SeenSet(p);
 		expect(second.claim("persist-id", 1)).toBe(false);
-	});
-});
-
-describe("IdentityStore", () => {
-	// Each test gets its OWN identities file: the first-link behavior is
-	// order-sensitive (a shared file would carry an earlier test's
-	// link/home across tests).
-	let counter = 0;
-	const store = () =>
-		new IdentityStore(join(dir, `identities-${counter++}.json`));
-	const channelConfig = parseGatewayConfig({
-		channels: {
-			loop: {
-				dm: "allowlist",
-				allow: [{ sender: "100000001", user: "alice" }],
-			},
-		},
-	}).channels;
-	const loopChannel = channelConfig.loop;
-	if (loopChannel === undefined || "failed" in loopChannel) {
-		throw new Error("test setup: loop channel must parse");
-	}
-	const loop = loopChannel;
-
-	test("userFor: an allowlisted sender resolves via allow", () => {
-		const s = store();
-		expect(s.userFor(loop, "loop", "100000001")).toEqual({
-			user: "alice",
-			via: "allow",
-		});
-	});
-
-	test("userFor: an unknown sender resolves undefined", () => {
-		const s = store();
-		expect(s.userFor(loop, "loop", "999")).toBeUndefined();
-	});
-
-	test("userFor: a linked sender resolves via link", async () => {
-		const s = store();
-		await s.link("loop", "999", "bob", "pairing", {
-			chatId: "999",
-			chatType: "dm",
-		});
-		expect(s.userFor(loop, "loop", "999")).toEqual({
-			user: "bob",
-			via: "link",
-		});
-	});
-
-	test("the allowlist wins over a conflicting link", async () => {
-		const s = store();
-		await s.link("loop", "100000001", "bob", "pairing", {
-			chatId: "100000001",
-			chatType: "dm",
-		});
-		// The allowlist pins alice; the bob link stays stored but never wins.
-		expect(s.userFor(loop, "loop", "100000001")).toEqual({
-			user: "alice",
-			via: "allow",
-		});
-	});
-
-	test("the first link sets the home chat; setHome moves it", async () => {
-		const s = store();
-		const first: ChatRef = { chatId: "9001", chatType: "dm" };
-		const second: ChatRef = { chatId: "9002", chatType: "dm" };
-		await s.link("loop", "9001", "bob", "pairing", first);
-		expect(s.homesOf("bob")).toEqual([{ channel: "loop", chat: first }]);
-		await s.setHome("bob", "loop", second);
-		expect(s.homesOf("bob")).toEqual([{ channel: "loop", chat: second }]);
-	});
-
-	test("unlinkUser removes every link and home of the user", async () => {
-		const s = store();
-		await s.link("loop", "9001", "bob", "pairing", {
-			chatId: "9001",
-			chatType: "dm",
-		});
-		await s.link("loop", "9002", "bob", "self", {
-			chatId: "9002",
-			chatType: "dm",
-		});
-		await s.unlinkUser("bob");
-		expect(s.userFor(loop, "loop", "9001")).toBeUndefined();
-		expect(s.userFor(loop, "loop", "9002")).toBeUndefined();
-		expect(s.homesOf("bob")).toEqual([]);
-	});
-
-	test("links persist across instances", async () => {
-		const p = join(dir, "identities-persist.json");
-		const first = new IdentityStore(p);
-		await first.link("loop", "9001", "bob", "pairing", {
-			chatId: "9001",
-			chatType: "dm",
-		});
-		const second = new IdentityStore(p);
-		expect(second.userFor(loop, "loop", "9001")).toEqual({
-			user: "bob",
-			via: "link",
-		});
 	});
 });

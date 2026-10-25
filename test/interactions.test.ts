@@ -260,7 +260,7 @@ async function rig(): Promise<Rig> {
 	const prompts = new PromptStore(join(dir, "prompts.json"));
 	const ledger = new Ledger(join(dir, "ledger.json"));
 	const bindings = new BindingStore(join(dir, "bindings.json"));
-	const identities = new IdentityStore(join(dir, "identities.json"));
+	const identities = new IdentityStore(host, join(dir, "identities.json"));
 	await identities.link("loop", "100000001", "alice", "pairing", CHAT);
 	await identities.link("loop", "200000002", "bob", "pairing", { chatId: "200000002", chatType: "dm" });
 	const tokens = new ButtonTokens();

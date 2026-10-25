@@ -27,6 +27,16 @@ async function fakeHost(): Promise<FakeHost> {
 }
 
 describe("createGateway (the factory)", () => {
+	test("quarantines a core without host.accounts", async () => {
+		const host = await fakeHost();
+		const legacy = Object.fromEntries(
+			Object.entries(host).filter(([key]) => key !== "accounts"),
+		) as unknown as Parameters<typeof createGateway>[0];
+		expect(() => createGateway(legacy)).toThrow(
+			"gateway requires sigrun core with host.accounts (multi-user M3a)",
+		);
+	});
+
 	test("returns extension.name === \"gateway\" and a gateway with the four functions", async () => {
 		const host = await fakeHost();
 		const result = await createGateway(host);

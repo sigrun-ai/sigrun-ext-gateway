@@ -88,6 +88,8 @@ export interface FakeHost extends SigrunHost {
 	readonly interactions: ReadonlyMap<string, InteractionRecord>;
 	/** The stored conversation metas, keyed id. */
 	readonly metas: ReadonlyMap<ConversationId, SessionMeta>;
+	/** Core's account-link table, exposed for seeding and assertions. */
+	accountLinks(): readonly AccountLinkWire[];
 	/** Tear down the stores dir (call from an afterAll). */
 	readonly close: () => Promise<void>;
 }
@@ -180,6 +182,39 @@ export async function createFakeHost(
 
 	const host: SigrunHost = {
 		stores: {
+			// Per-user stores are outside the gateway's reads; keep the
+			// contract whole with the same in-memory settings/secrets.
+			user: (user: string) => ({
+				secrets: {
+					get: async (key: string) => {
+						record("stores.user.secrets.get", user, key);
+						return secretsValue[key];
+					},
+					set: async (key: string, value: string) => {
+						record("stores.user.secrets.set", user, key, value);
+						secretsValue[key] = value;
+					},
+					delete: async (key: string) => {
+						record("stores.user.secrets.delete", user, key);
+						delete secretsValue[key];
+					},
+				},
+				settings: {
+					get: async () => {
+						record("stores.user.settings.get", user);
+						return settingsValue;
+					},
+					set: async (value: Record<string, unknown>) => {
+						record("stores.user.settings.set", user, value);
+						settingsValue = value;
+					},
+				},
+				paths: {
+					data: join(storesDir, "data", "users", user),
+					state: join(storesDir, "state", "users", user),
+					cache: join(storesDir, "cache", "users", user),
+				},
+			}),
 			secrets: {
 				get: async (key: string) => {
 					record("stores.secrets.get", key);
@@ -211,6 +246,18 @@ export async function createFakeHost(
 				get state() {
 					return join(storesDir, "state");
 				},
+			},
+		},
+
+		tools: {
+			setUserTools: (user, tools) => {
+				record("tools.setUserTools", user, tools.map((tool) => tool.name));
+			},
+		},
+		services: {
+			connect: async (name, user) => {
+				record("services.connect", name, user);
+				throw new Error(`fake host: no service ${name}`);
 			},
 		},
 
@@ -476,10 +523,8 @@ export async function createFakeHost(
 			},
 		},
 
-		// External account links (multi-user M3a): the in-memory table the
-		// 0.1.6 contract requires. The engine does not use it yet (the
-		// identity store owns chat links); the surface is here so the host
-		// shape is whole for the tests that boot it.
+		// External account links (multi-user M3a): the single owner of chat
+		// identity links, with core's conflict and unknown-user semantics.
 		accounts: {
 			lookup: async (provider: string, subject: string) => {
 				record("accounts.lookup", provider, subject);
@@ -497,12 +542,15 @@ export async function createFakeHost(
 				if (existing !== undefined) {
 					if (existing.user === user) return existing;
 					throw new Error(
-						`account_link_conflict: ${provider}/${subject} is already linked`,
-				);
+						`account_link_conflict: ${provider} is linked to another user`,
+					);
+				}
+				if (!directory.has(user)) {
+					throw new Error(`unknown user "${user}"`);
 				}
 				const row: AccountLinkWire = {
 					provider,
-				subject,
+					subject,
 					user,
 					linkedAt: 0,
 					via,
@@ -575,6 +623,7 @@ export async function createFakeHost(
 			watchList.filter((watcher) => watcher.id === id).length,
 		interactions,
 		metas,
+		accountLinks: () => [...accountLinks.values()],
 		close: async () => {
 			// Only the dir the host OWNED (a temp dir) is removed; a
 			// caller-supplied storesDir is the caller's to manage.

@@ -207,7 +207,7 @@ async function pairRig(
 }> {
 	const dir = await tempDir("sigrun-gw-pair-");
 	const host = await createFakeHost({ storesDir: dir, users });
-	const identities = new IdentityStore(join(dir, "gateway", "identities.json"));
+	const identities = new IdentityStore(host, join(dir, "gateway", "identities.json"));
 	const pairing = new PairingStore(join(dir, "gateway", "pairing.json"), {
 		now: () => T0,
 	});
@@ -278,7 +278,7 @@ describe("runPair (the /pair command)", () => {
 		expect(reply).toContain("bob");
 		expect(deps.pairing.pending().length).toBe(0);
 		const config = loopConfig({});
-		expect(identities.userFor(config, "loop", "100000001")).toEqual({
+		expect(await identities.userFor(config, "loop", "100000001")).toEqual({
 			user: "bob",
 			via: "link",
 		});
@@ -327,7 +327,7 @@ describe("runPair (the /pair command)", () => {
 		expect(reply).toContain("already linked");
 		expect(deps.pairing.pending().length).toBe(1);
 		const config = loopConfig({});
-		expect(identities_user(deps, config)).toBe("alice");
+		expect(await identities_user(deps, config)).toBe("alice");
 	});
 
 	test("malformed args get a usage line", async () => {
@@ -338,8 +338,8 @@ describe("runPair (the /pair command)", () => {
 });
 
 /** Resolve sender 100000001 on loop through the rig's identity store. */
-function identities_user(deps: PairDeps, config: ChannelConfig): string | undefined {
-	return deps.identities.userFor(config, "loop", "100000001")?.user;
+async function identities_user(deps: PairDeps, config: ChannelConfig): Promise<string | undefined> {
+	return (await deps.identities.userFor(config, "loop", "100000001"))?.user;
 }
 
 /** One parsed loop channel config over `over`. */
@@ -369,9 +369,9 @@ describe("redeemLink (the /link chat side, pipeline stage 4)", () => {
 		const dir = await tempDir("sigrun-gw-link-");
 		const host = await createFakeHost({
 			storesDir: dir,
-			users: [{ user: "alice", admin: true }],
+			users: [{ user: "alice", admin: true }, { user: "bob" }],
 		});
-		const identities = new IdentityStore(join(dir, "gateway", "identities.json"));
+		const identities = new IdentityStore(host, join(dir, "gateway", "identities.json"));
 		const codes = new LinkCodes();
 		const channel = fakeChannel();
 		const deps: LinkDeps = {
@@ -397,7 +397,7 @@ describe("redeemLink (the /link chat side, pipeline stage 4)", () => {
 		const code = rig.codes.issue("alice", "loop", T0);
 		const reply = await redeemLink(rig.deps, "loop", dmEvent(`/link ${code}`));
 		expect(reply).toContain("alice");
-		expect(rig.identities.userFor(loopConfig({}), "loop", "100000001")).toEqual({
+		expect(await rig.identities.userFor(loopConfig({}), "loop", "100000001")).toEqual({
 			user: "alice",
 			via: "link",
 		});
@@ -416,8 +416,9 @@ describe("redeemLink (the /link chat side, pipeline stage 4)", () => {
 		expect(reply).toContain("already linked");
 		// The code is NOT consumed: after removing the conflicting link the
 		// same code still redeems.
+		await rig.host.accounts.unlink("chat:loop", "100000001");
 		const reply2 = await redeemLink(rig.deps, "loop", dmEvent(`/link ${code}`));
-		expect(reply2).toContain("already linked");
+		expect(reply2).toContain("You are linked to sigrun as alice");
 	});
 
 	test("an unknown code replies a notice", async () => {
@@ -466,7 +467,7 @@ async function stageRig(
 	await host.stores.settings.set(gatewaySettings);
 	const channel = fakeChannel();
 	const access: AccessState = {
-		identities: new IdentityStore(join(dir, "gateway", "identities.json")),
+		identities: new IdentityStore(host, join(dir, "gateway", "identities.json")),
 		pairing: new PairingStore(join(dir, "gateway", "pairing.json"), {
 			now: () => T0,
 		}),
@@ -554,7 +555,7 @@ describe("pipeline step 4: self-link", () => {
 		expect(rig.sent[0]?.text).toContain("alice");
 		expect(rig.submits()).toBe(0);
 		expect(
-			rig.access.identities.userFor(loopConfig({}), "loop", "100000001"),
+			await rig.access.identities.userFor(loopConfig({}), "loop", "100000001"),
 		).toEqual({ user: "alice", via: "link" });
 	});
 
@@ -598,7 +599,7 @@ describe("pipeline step 4: self-link", () => {
 		expect(outcome).toEqual({ outcome: "dropped" });
 		expect(rig.sent).toEqual([]);
 		expect(
-			rig.access.identities.userFor(loopConfig({ selfLink: false }), "loop", "200000002"),
+			await rig.access.identities.userFor(loopConfig({ selfLink: false }), "loop", "200000002"),
 		).toBeUndefined();
 	});
 });
@@ -741,7 +742,7 @@ describe("pipeline step 5: DM policies", () => {
 		await rig.action(approve.data);
 		expect(rig.access.pairing.pending().length).toBe(0);
 		expect(
-			rig.access.identities.userFor(loopConfig({}), "loop", "200000002"),
+			await rig.access.identities.userFor(loopConfig({}), "loop", "200000002"),
 		).toEqual({ user: "bob", via: "link" });
 		// The requester got the "linked" message (the LATEST one to their
 		// DM — the pairing reply came first).
@@ -785,7 +786,7 @@ describe("pipeline step 5: DM policies", () => {
 		await rig.actionAsSender("200000002", token);
 		expect(rig.access.pairing.pending().length).toBe(1);
 		expect(
-			rig.access.identities.userFor(loopConfig({}), "loop", "300000003"),
+			await rig.access.identities.userFor(loopConfig({}), "loop", "300000003"),
 		).toBeUndefined();
 	});
 

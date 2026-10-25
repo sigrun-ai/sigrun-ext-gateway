@@ -1,65 +1,52 @@
 /**
- * The identity store (spec §8.2): platform sender ids → sigrun users,
- * persisted at `<stateDir>/gateway/identities.json` in the ENGINE's own
- * state (never core's directory — the links are the gateway's to own).
+ * Sender identity resolution (spec §8.2): core owns the link table;
+ * this store owns only per-user home chats in `identities.json`.
  *
- * Resolution order for `userFor`: the channel's ALLOWLIST first, then a
- * stored link. When both exist and disagree, the allowlist wins and the
- * conflict is logged once per (channel, sender) — the operator pinned
- * the mapping deliberately, so a stale link must never shadow it. The
- * first link for a user also records their HOME chat for that channel
- * (§8.8: notifications target it); `/home` moves it later.
+ * Resolution order for `userFor`: the channel's ALLOWLIST first, then
+ * `host.accounts.lookup("chat:<channel>", senderId)`. An allowlist hit
+ * deliberately performs no core lookup: it is the operator's pinned
+ * mapping, and any disagreeing core link remains inert.
  */
 import { JsonFile } from "./json-file.js";
-/** The link key: `channel:senderId`. */
-function linkKey(channel, senderId) {
-    return `${channel}:${senderId}`;
-}
-/**
- * The sender → user resolution, one instance per engine. All mutations
- * persist through the serialized JsonFile queue.
- */
+/** Core-backed sender resolution and engine-owned home-chat persistence. */
 export class IdentityStore {
+    host;
     file;
-    log;
-    conflictLogged = new Set();
-    constructor(path, opts = {}) {
-        this.file = new JsonFile(path, () => ({
-            links: {},
-            homes: {},
-        }));
-        this.log = opts.log;
-        // The in-memory view loads SYNCHRONOUSLY at construction: a second
-        // instance over the same file (the restart path) resolves links
-        // from its first `userFor` — the constructor cannot await, and the
-        // queue is empty here so nothing can interleave.
+    homes = {};
+    constructor(host, path, opts = {}) {
+        this.host = host;
+        this.file = new JsonFile(path, () => ({ homes: {} }));
+        // Home reads are synchronous by contract; load the mirror before
+        // admitting work, as the other engine-owned JsonFile stores do.
         const state = this.file.readSync();
-        this.links = state.links;
         this.homes = state.homes;
-    }
-    /**
-     * Resolve `senderId` on `channel` against `config`: the allowlist
-     * wins over a link; undefined when the sender is unknown. A
-     * conflicting (allow ≠ link) pair is logged once per sender.
-     */
-    userFor(config, channel, senderId) {
-        const allowed = config.allow.find((entry) => entry.sender === senderId)?.user;
-        const linked = this.links[linkKey(channel, senderId)]?.user;
-        if (allowed !== undefined) {
-            if (linked !== undefined && linked !== allowed) {
-                this.log?.once(`identity-conflict:${channel}:${senderId}`, "warn", `allowlist user "${allowed}" shadows linked user "${linked}" for channel "${channel}"`);
-            }
-            return { user: allowed, via: "allow" };
+        const legacyCount = Object.keys(state.links ?? {}).length;
+        if (legacyCount > 0) {
+            opts.log?.warn(`identities.json contains ${legacyCount} legacy links; those senders must pair or self-link again`);
         }
-        if (linked !== undefined)
-            return { user: linked, via: "link" };
-        return undefined;
     }
-    /** Link `senderId` on `channel` to `user`; the FIRST link also sets
-     *  the user's home chat on that channel (§8.8). */
+    /** Resolve the allowlist first; only an unlisted sender reads core. */
+    async userFor(config, channel, senderId) {
+        const allowed = config.allow.find((entry) => entry.sender === senderId)?.user;
+        if (allowed !== undefined)
+            return { user: allowed, via: "allow" };
+        const linked = await this.host.accounts.lookup(`chat:${channel}`, senderId);
+        return linked === undefined ? undefined : { user: linked.user, via: "link" };
+    }
+    /** Link through core; only core's conflict refusal maps to a result. */
     async link(channel, senderId, user, via, dmChat) {
+        try {
+            await this.host.accounts.link(`chat:${channel}`, senderId, user, via);
+        }
+        catch (error) {
+            if (error instanceof Error &&
+                error.message.startsWith("account_link_conflict:")) {
+                return { linked: false, reason: "conflict" };
+            }
+            throw error;
+        }
         await this.file.update((draft) => {
-            draft.links[linkKey(channel, senderId)] = { user, via };
+            delete draft.links;
             // First link sets the home chat (a later /home moves it).
             if (draft.homes[user]?.[channel] === undefined) {
                 const perChannel = draft.homes[user] ?? {};
@@ -67,23 +54,21 @@ export class IdentityStore {
                 draft.homes[user] = perChannel;
             }
         }).then((state) => this.reload(state));
+        // The link is already durable in core. A home-write failure must
+        // not roll back that fact in memory: preserve this absent home in
+        // the mirror so the caller's next link attempt cannot be misread
+        // as the first one; the failed write remains loud to the caller.
+        if (this.homes[user]?.[channel] === undefined) {
+            const perChannel = this.homes[user] ?? {};
+            perChannel[channel] = { chat: dmChat };
+            this.homes[user] = perChannel;
+        }
+        return { linked: true };
     }
-    /**
-     * The stored link's user for `senderId` on `channel` (the LINK alone,
-     * never the allowlist): the pairing/self-link conflict guards read
-     * this — a sender already linked to a DIFFERENT user must refuse,
-     * never silently re-point (§8.2).
-     */
-    linkedUserOf(channel, senderId) {
-        return this.links[linkKey(channel, senderId)]?.user;
-    }
-    /** Remove every link and home chat of `user` (the userDeleted path). */
-    async unlinkUser(user) {
+    /** Core removes links before userDeleted; the engine clears homes only. */
+    async forgetHomes(user) {
         await this.file.update((draft) => {
-            for (const [key, row] of Object.entries(draft.links)) {
-                if (row.user === user)
-                    delete draft.links[key];
-            }
+            delete draft.links;
             delete draft.homes[user];
         }).then((state) => this.reload(state));
     }
@@ -107,6 +92,7 @@ export class IdentityStore {
         perChannel[channel] = { chat };
         this.homes[user] = perChannel;
         return this.file.update((draft) => {
+            delete draft.links;
             if (draft.homes[user]?.[channel] !== undefined)
                 return;
             const stored = draft.homes[user] ?? {};
@@ -117,21 +103,14 @@ export class IdentityStore {
     /** Set (move) the user's home chat on `channel`. */
     async setHome(user, channel, chat) {
         await this.file.update((draft) => {
+            delete draft.links;
             const perChannel = draft.homes[user] ?? {};
             perChannel[channel] = { chat };
             draft.homes[user] = perChannel;
         }).then((state) => this.reload(state));
     }
-    /**
-     * The in-memory view (links + homes): loaded at construction
-     * (readSync) and refreshed after every queued mutation — `userFor`
-     * and `homesOf` are synchronous by contract.
-     */
-    links = {};
-    homes = {};
-    /** Refresh the in-memory view from the written state (post-mutation). */
+    /** Refresh the home mirror from the written state (post-mutation). */
     reload(state) {
-        this.links = state.links;
         this.homes = state.homes;
     }
 }

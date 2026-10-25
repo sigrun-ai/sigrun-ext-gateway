@@ -15,9 +15,9 @@
  * `approve <code> <user>` links the REQUESTER (the platform sender who
  * asked to pair) to the named directory user via the identity store
  * (`via: "pairing"`), sets their DM as the home chat, and sends them a
- * "linked" message through their channel. A sender already linked to
- * another user is refused, never silently re-pointed — the request
- * stays pending for an admin to resolve (deny, or fix the link).
+ * "linked" message through their channel. Core refuses a sender already
+ * linked to another user; the request then stays pending for an admin
+ * to resolve (deny, or remove the link).
  */
 import type { ChannelContribution } from "@sigrun/sigrun/extension";
 import type { EngineLog } from "../log.js";
@@ -65,9 +65,8 @@ export declare function runPair(deps: PairDeps, args: string, caller: PairCaller
 export declare function denyPairing(deps: PairDeps, code: string): string;
 /**
  * Apply `approve <code> <user>` (the command and the "Approve as"
- * buttons share this path): directory check, conflict check, then the
- * link + the requester's "linked" message. The conflict check runs
- * BEFORE the queue row is consumed so a refused approval leaves the
- * request pending.
+ * buttons share this path): directory check, core-backed link, then
+ * consume the queue row and send the requester's "linked" message.
+ * Core's conflict refusal leaves the request pending.
  */
 export declare function approvePairing(deps: PairDeps, code: string, namedUser: string): Promise<string>;

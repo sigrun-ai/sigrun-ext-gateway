@@ -9,10 +9,9 @@
  * M9; the group refusal lives in the pipeline step, which owns the
  * chat-shape check).
  *
- * A sender already linked to another user gets the pinned conflict
- * reply and the code is NOT consumed: the user fixes the conflicting
- * link in sigrun, then sends the SAME code again. The peek-then-redeem
- * ordering is what keeps the code live on conflict.
+ * A sender already linked to another user gets core's conflict refusal
+ * and the pinned reply; the code is NOT consumed until the link lands,
+ * so the user can remove the conflicting link and send the SAME code.
  */
 import type { InboundEvent } from "@sigrun/sigrun/extension";
 import type { EngineLog } from "../log.js";
@@ -32,12 +31,9 @@ export interface LinkDeps {
 }
 /**
  * Handle `/link <code>` from a DM: redeem, link, and return the reply
- * text (the pipeline sends it). The conflict check reads the LINK
- * table alone (`linkedUserOf`): spec §8.2 pins the refusal to a sender
- * "already linked to another user" — the static allowlist is the
- * operator's deliberate precedence-1 pin and never blocks a self-link
- * (it shadows the link afterward, exactly as any stale link). Never
- * throws across the boundary.
+ * text (the pipeline sends it). Core owns the conflict check; the
+ * static allowlist never blocks a self-link (it shadows the link
+ * afterward, exactly as any stale link).
  */
 export declare function redeemLink(deps: LinkDeps, channel: string, event: InboundEvent): Promise<string>;
 /** The `/link <channel>` webui/TUI command's dependencies. */

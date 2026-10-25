@@ -15,9 +15,9 @@
  * `approve <code> <user>` links the REQUESTER (the platform sender who
  * asked to pair) to the named directory user via the identity store
  * (`via: "pairing"`), sets their DM as the home chat, and sends them a
- * "linked" message through their channel. A sender already linked to
- * another user is refused, never silently re-pointed — the request
- * stays pending for an admin to resolve (deny, or fix the link).
+ * "linked" message through their channel. Core refuses a sender already
+ * linked to another user; the request then stays pending for an admin
+ * to resolve (deny, or remove the link).
  */
 
 import type { ChannelContribution } from "@sigrun/sigrun/extension";
@@ -114,10 +114,9 @@ export function denyPairing(deps: PairDeps, code: string): string {
 
 /**
  * Apply `approve <code> <user>` (the command and the "Approve as"
- * buttons share this path): directory check, conflict check, then the
- * link + the requester's "linked" message. The conflict check runs
- * BEFORE the queue row is consumed so a refused approval leaves the
- * request pending.
+ * buttons share this path): directory check, core-backed link, then
+ * consume the queue row and send the requester's "linked" message.
+ * Core's conflict refusal leaves the request pending.
  */
 export async function approvePairing(
 	deps: PairDeps,
@@ -133,21 +132,15 @@ export async function approvePairing(
 	if (request === undefined) {
 		return `unknown pairing code ${code}.`;
 	}
-	const existing = deps.identities.linkedUserOf(
-		request.channel,
-		request.senderId,
-	);
-	if (existing !== undefined && existing !== namedUser) {
-		return PAIR_CONFLICT_REPLY;
-	}
-	deps.pairing.approve(code, deps.now());
-	await deps.identities.link(
+	const linked = await deps.identities.link(
 		request.channel,
 		request.senderId,
 		namedUser,
 		"pairing",
 		request.chat,
 	);
+	if (!linked.linked) return PAIR_CONFLICT_REPLY;
+	deps.pairing.approve(code, deps.now());
 	deps.log.info(
 		`pairing approved on channel "${request.channel}" for user "${namedUser}"`,
 	);

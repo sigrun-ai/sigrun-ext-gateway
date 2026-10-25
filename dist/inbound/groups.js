@@ -2,11 +2,10 @@
  * Group admission and sharing (spec §8.2): group config is consulted for
  * every event, linked identities retain their own sender attribution,
  * and unlinked `anyone` senders act only through the group owner's
- * restricted conversation. Admission is synchronous like `userFor`;
- * Task 13 moves both identity resolutions behind an async interface.
+ * restricted conversation. Identity resolution reads core's link table.
  */
 /** Resolve one event against the channel's current group configuration. */
-export function admitGroupEvent(config, channel, event, identities) {
+export async function admitGroupEvent(config, channel, event, identities) {
     const row = config.groups.find((group) => group.chat === event.chat.chatId);
     if (row === undefined)
         return { admit: false, reason: "unlisted" };
@@ -15,7 +14,7 @@ export function admitGroupEvent(config, channel, event, identities) {
     if (row.mention === "required" && event.mentioned !== true) {
         return { admit: false, reason: "mention" };
     }
-    const resolved = identities.userFor(config, channel, event.sender.id);
+    const resolved = await identities.userFor(config, channel, event.sender.id);
     if (resolved === undefined && row.members === "linked") {
         return { admit: false, reason: "unlinked" };
     }

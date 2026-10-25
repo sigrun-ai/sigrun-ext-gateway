@@ -105,9 +105,10 @@ export function createInteractionAnswerStage(
 	return async (channelId, event) => {
 		const key = bindingKey(channelId, event.chat);
 		const config = await deps.configOf?.(channelId);
-		const user = config === undefined
-			? deps.identities.linkedUserOf(channelId, event.sender.id)
-			: deps.identities.userFor(config, channelId, event.sender.id)?.user;
+		const resolved = config === undefined
+			? await deps.host.accounts.lookup(`chat:${channelId}`, event.sender.id)
+			: await deps.identities.userFor(config, channelId, event.sender.id);
+		const user = resolved?.user;
 		const lookupKeys = user === undefined ? [key] : [key, `user:${user}`];
 		const lookup = <T>(read: (candidate: string) => T | undefined): T | undefined => {
 			for (const candidate of lookupKeys) {

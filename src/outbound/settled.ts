@@ -370,7 +370,7 @@ async function bindingUser(
 		// A DM binding's chat id IS the platform sender id: the admission's
 		// own resolution (allowlist first, then the stored link) — the
 		// allowlist mapping outlives the link.
-		return deps.identities.userFor(config, channel, chat.chatId)?.user;
+		return (await deps.identities.userFor(config, channel, chat.chatId))?.user;
 	}
 	// A group binding's user is the configured OWNER (spec §8.2: the
 	// group's owner is who the run acts for).

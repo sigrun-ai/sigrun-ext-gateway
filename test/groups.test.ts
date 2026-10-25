@@ -1,6 +1,6 @@
 /**
  * Group admission and sharing (Task 8, spec §8.2/§8.3): mention gating,
- * member modes, the synchronous admission result, group creation, and
+ * member modes, the asynchronous admission result, group creation, and
  * people-sharing updates over FakeHost.
  *
  * Tests own their literals: alice/bob/mallory and "-100000000002".
@@ -65,7 +65,11 @@ function config(groups: readonly Record<string, unknown>[]): ChannelConfig {
 async function identities(): Promise<IdentityStore> {
 	const dir = await mkdtemp(join(tmpdir(), "sigrun-gw-groups-"));
 	cleanups.push(() => rm(dir, { recursive: true, force: true }));
-	const store = new IdentityStore(join(dir, "identities.json"));
+	const host = await createFakeHost({
+		storesDir: dir,
+		users: [{ user: "alice" }, { user: "bob" }],
+	});
+	const store = new IdentityStore(host, join(dir, "identities.json"));
 	await store.link("loop", "100000001", "alice", "pairing", {
 		chatId: "100000001",
 		chatType: "dm",
@@ -79,7 +83,7 @@ async function identities(): Promise<IdentityStore> {
 
 describe("admitGroupEvent", () => {
 	test("an unlisted group is refused", async () => {
-		expect(admitGroupEvent(config([]), "loop", event(), await identities())).toEqual({
+		expect(await admitGroupEvent(config([]), "loop", event(), await identities())).toEqual({
 			admit: false,
 			reason: "unlisted",
 		});
@@ -96,7 +100,7 @@ describe("admitGroupEvent", () => {
 		if (malformed === undefined || "failed" in malformed) {
 			throw new Error("test setup: channel parse failed");
 		}
-		expect(admitGroupEvent(malformed, "loop", event(), await identities())).toEqual({
+		expect(await admitGroupEvent(malformed, "loop", event(), await identities())).toEqual({
 			admit: false,
 			reason: "failed",
 		});
@@ -105,13 +109,13 @@ describe("admitGroupEvent", () => {
 	test("mention required drops an unmentioned message", async () => {
 		const cfg = config([{ chat: CHAT.chatId, owner: "alice", mention: "required" }]);
 		expect(
-			admitGroupEvent(cfg, "loop", event({ mentioned: false }), await identities()),
+			await admitGroupEvent(cfg, "loop", event({ mentioned: false }), await identities()),
 		).toEqual({ admit: false, reason: "mention" });
 	});
 
 	test("mention always admits an unmentioned linked member", async () => {
 		const cfg = config([{ chat: CHAT.chatId, owner: "alice", mention: "always" }]);
-		const result = admitGroupEvent(
+		const result = await admitGroupEvent(
 			cfg,
 			"loop",
 			event({ mentioned: false }),
@@ -128,7 +132,7 @@ describe("admitGroupEvent", () => {
 	test("linked mode drops an unlinked sender", async () => {
 		const cfg = config([{ chat: CHAT.chatId, owner: "alice", members: "linked" }]);
 		expect(
-			admitGroupEvent(
+			await admitGroupEvent(
 				cfg,
 				"loop",
 				event({ sender: { id: "300000003", name: "Mallory" } }),
@@ -147,7 +151,7 @@ describe("admitGroupEvent", () => {
 			},
 		]);
 		expect(
-			admitGroupEvent(
+			await admitGroupEvent(
 				cfg,
 				"loop",
 				event({ sender: { id: "300000003", name: "Mallory" } }),
@@ -251,7 +255,13 @@ async function pipelineRig(group: Record<string, unknown>): Promise<PipelineRig>
 			{ user: "bob", admin: false, createdAt: 0, source: "cli" },
 		],
 	});
-	const ids = await identities();
+	const ids = new IdentityStore(host, join(dir, "identities.json"));
+	await ids.link("loop", "100000001", "alice", "pairing", {
+		chatId: "100000001", chatType: "dm",
+	});
+	await ids.link("loop", "200000002", "bob", "pairing", {
+		chatId: "200000002", chatType: "dm",
+	});
 	const access: AccessState = {
 		identities: ids,
 		pairing: new PairingStore(join(dir, "pairing.json")),

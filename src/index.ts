@@ -40,6 +40,9 @@ import { createChannelSection } from "./section.js";
  * a second declarer quarantines).
  */
 export default function createGateway(host: SigrunHost): SigrunExtensionResult {
+	if (host.accounts === undefined) {
+		throw new Error("gateway requires sigrun core with host.accounts (multi-user M3a)");
+	}
 	const engine = createEngine(host);
 	// `/pair` (§8.2): the admin surface over the shared pairing queue.
 	// The invoke route hands the caller's principal (user + EFFECTIVE
@@ -85,7 +88,7 @@ export default function createGateway(host: SigrunHost): SigrunExtensionResult {
 		// Task 12 owns links as well as homes; Task 13 moves links to core's
 		// account table and narrows this cleanup to the home-chat records.
 		userDeleted: async ({ user }) => {
-			await engine.accessState().identities.unlinkUser(user);
+			await engine.accessState().identities.forgetHomes(user);
 		},
 		// Home-chat notifications share the delivery ledger and workers;
 		// this wrapper kicks delivery after each bounded enqueue.

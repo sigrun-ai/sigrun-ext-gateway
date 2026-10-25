@@ -147,7 +147,7 @@ export function createEngine(host, deps = {}) {
     // factory time (cheap: the stores load synchronously; no timers, no
     // I/O beyond the state reads — the pi lifecycle rule holds).
     const access = {
-        identities: new IdentityStore(join(gatewayDir, "identities.json")),
+        identities: new IdentityStore(host, join(gatewayDir, "identities.json")),
         pairing: new PairingStore(join(gatewayDir, "pairing.json")),
         linkCodes: new LinkCodes(),
         tokens: new ButtonTokens(),

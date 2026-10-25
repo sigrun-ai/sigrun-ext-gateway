@@ -274,7 +274,7 @@ describe("engine shutdown (§8.13)", () => {
 });
 
 describe("user deletion", () => {
-	test("userDeleted removes every link and home chat for that user only", async () => {
+	test("userDeleted removes homes only after core removed the links", async () => {
 		const host = await createFakeHost({ users: [{ user: "alice" }, { user: "bob" }] });
 		cleanups.push(host.close);
 		const result = createGateway(host);
@@ -289,6 +289,8 @@ describe("user deletion", () => {
 		});
 		expect(identities.homesOf("bob")).toHaveLength(1);
 		if (result.userDeleted === undefined) throw new Error("userDeleted handler missing");
+		// Core's deletion route removes account links before this event.
+		await host.accounts.unlink("chat:loop", "100000001");
 		await result.userDeleted(
 			{ user: "bob", transferTo: "alice" },
 			{
@@ -301,8 +303,8 @@ describe("user deletion", () => {
 		const { parseGatewayConfig } = await import("../src/config.js");
 		const block = parseGatewayConfig({ channels: { loop: {} } }).channels.loop;
 		if (block === undefined || "failed" in block) throw new Error("bad test config");
-		expect(identities.userFor(block, "loop", "100000001")).toBeUndefined();
-		expect(identities.userFor(block, "loop", "200000002")?.user).toBe("alice");
+		expect(await identities.userFor(block, "loop", "100000001")).toBeUndefined();
+		expect((await identities.userFor(block, "loop", "200000002"))?.user).toBe("alice");
 		expect(identities.homesOf("bob")).toEqual([]);
 		expect(identities.homesOf("alice")).toHaveLength(1);
 	});

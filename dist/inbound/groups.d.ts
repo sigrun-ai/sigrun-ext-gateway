@@ -2,8 +2,7 @@
  * Group admission and sharing (spec §8.2): group config is consulted for
  * every event, linked identities retain their own sender attribution,
  * and unlinked `anyone` senders act only through the group owner's
- * restricted conversation. Admission is synchronous like `userFor`;
- * Task 13 moves both identity resolutions behind an async interface.
+ * restricted conversation. Identity resolution reads core's link table.
  */
 import type { InboundEvent, SigrunHost } from "@sigrun/sigrun/extension";
 import type { ConversationId } from "@earendil-works/pi-durable";
@@ -22,7 +21,7 @@ export type GroupAdmission = {
     readonly senderLabel: string;
 };
 /** Resolve one event against the channel's current group configuration. */
-export declare function admitGroupEvent(config: ChannelConfig, channel: string, event: InboundEvent, identities: IdentityStore): GroupAdmission;
+export declare function admitGroupEvent(config: ChannelConfig, channel: string, event: InboundEvent, identities: IdentityStore): Promise<GroupAdmission>;
 /**
  * Give a linked speaker write access without discarding existing people.
  * The owner already has write access and must not also appear as a guest.

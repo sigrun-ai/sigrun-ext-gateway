@@ -197,9 +197,9 @@ export interface PipelineHandle extends Receive {
 }
 
 /** Build a private access state over `stateDir` (the no-`access` shape). */
-function privateAccess(stateDir: string, now: () => number): AccessState {
+function privateAccess(host: SigrunHost, stateDir: string, now: () => number): AccessState {
 	return {
-		identities: new IdentityStore(join(stateDir, "identities.json")),
+		identities: new IdentityStore(host, join(stateDir, "identities.json")),
 		pairing: new PairingStore(join(stateDir, "pairing.json"), { now }),
 		linkCodes: new LinkCodes(),
 		tokens: new ButtonTokens(),
@@ -219,7 +219,7 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 	const seen = new SeenSet(join(deps.stateDir, "seen.json"));
 	const access =
 		deps.access ??
-		privateAccess(deps.stateDir, () => now());
+		privateAccess(deps.host, deps.stateDir, () => now());
 	const albums = new AlbumCollector(now, ALBUM_WINDOW_MS);
 	// Per-group close timers (the album window's flush).
 	const albumTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -337,7 +337,7 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 		let group: GroupConfig | undefined;
 		let senderLabel = event.sender.name ?? event.sender.id;
 		if (event.chat.chatType !== "dm") {
-			const admission = admitGroupEvent(
+			const admission = await admitGroupEvent(
 				config,
 				channelId,
 				event,
@@ -373,7 +373,7 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 				senderLabel = admission.senderLabel;
 			}
 		} else {
-			const resolved = access.identities.userFor(
+			const resolved = await access.identities.userFor(
 				config,
 				channelId,
 				event.sender.id,
@@ -833,7 +833,7 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 	): Promise<void> {
 		const action = access.tokens.resolve(event.data);
 		if (action === undefined) return;
-		const tapper = access.identities.userFor(
+		const tapper = await access.identities.userFor(
 			config,
 			channelId,
 			event.sender.id,
