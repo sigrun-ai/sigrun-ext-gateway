@@ -525,9 +525,21 @@ export function createPipeline(deps) {
     // user. The requester's "linked" notice rides `approvePairing`.
     async function pipelineAction(channelId, event, config) {
         const action = access.tokens.resolve(event.data);
-        if (action === undefined || action.kind !== "pair")
+        if (action === undefined)
             return;
         const tapper = access.identities.userFor(config, channelId, event.sender.id);
+        if (action.kind === "interaction") {
+            if (deps.interactionAnswer === undefined)
+                return;
+            const reply = await deps.interactionAnswer({
+                conversationId: action.conversationId,
+                callId: action.callId,
+                values: { [action.field ?? "decision"]: action.optionId },
+                user: tapper?.user,
+            });
+            await sendNotice(event.chat, reply, undefined);
+            return;
+        }
         if (tapper === undefined) {
             deps.log.once(`tap-unknown:${channelId}:${event.sender.id}`, "warn", "pairing button tap from an unknown sender ignored");
             return;

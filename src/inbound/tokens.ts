@@ -35,6 +35,8 @@ export type TokenAction =
 			readonly kind: "interaction";
 			readonly conversationId: number;
 			readonly callId: string;
+			/** The root-form choice field (U6 records are not decision-specific). */
+			readonly field?: string;
 			readonly optionId: string;
 	  };
 

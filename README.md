@@ -162,6 +162,23 @@ Job answers are one-shot and durable: retries or later submissions do
 not duplicate the delivered answer. A job targeting an existing bound
 conversation uses that conversation's ordinary gateway fan-out instead.
 
+## Interactions in chat
+
+Pending interaction records render through the shared block-tree text
+projection. A single closed choice becomes buttons when they fit the
+channel's button limit, or a numbered list otherwise; a lone text or
+long-text field accepts a reply to its prompt. Other forms, including
+all forms containing secrets, point to the webui instead of collecting
+values over chat.
+
+Button taps, numbered replies, and reply-to text answers require a linked
+sender with current write access to the conversation. Numbered answers
+match only when exactly one choice interaction is pending in that chat.
+A prompt answered elsewhere is edited to show its outcome and loses its
+buttons; a later tap reports that outcome rather than answering again.
+Unbound conversations notify each write-access user's home DMs, while
+bound conversations prompt each bound chat once.
+
 ## Delivery, state, and shutdown
 
 Responses stream through adapter edit support where available. Final

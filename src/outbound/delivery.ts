@@ -42,6 +42,11 @@ export interface DeliveryDeps {
 	readonly resolveFiles?: (entry: LedgerEntry) => Promise<OutboundMessage["files"]>;
 	/** Terminal delivery outcomes for the channel's status counters. */
 	readonly counts?: { delivered(): void; failed(): void };
+	/** Persist a delivered interaction prompt's platform refs for edits/replies. */
+	readonly onInteractionReceipt?: (
+		entry: LedgerEntry,
+		receipt: { readonly messageIds: readonly string[] },
+	) => void | Promise<void>;
 }
 
 /** The pinned resend marker for recovered entries. */
@@ -180,8 +185,13 @@ export class DeliveryWorker {
 			// unmarked entry must not be sent — the crash window would
 			// duplicate it on recovery).
 			await this.ledger.mark(entry.id, "attempting");
-			const receipt = await this.boundedSend(message);
+			const receipt = entry.kind === "edit"
+				? await this.boundedEdit(entry, message)
+				: await this.boundedSend(message);
 			await this.ledger.mark(entry.id, "delivered", receipt.messageIds);
+			if (entry.kind === "interaction") {
+				await this.deps.onInteractionReceipt?.(entry, receipt);
+			}
 			this.deps.counts?.delivered();
 			return true;
 		} catch (error) {
@@ -226,6 +236,36 @@ export class DeliveryWorker {
 					reject(error);
 				});
 		});
+	}
+
+	/** Apply an edit entry; its ledger row carries the target MessageRef. */
+	private async boundedEdit(
+		entry: LedgerEntry,
+		message: OutboundMessage,
+	): Promise<{ messageIds: readonly string[] }> {
+		if (entry.ref === undefined || this.channel.edit === undefined) {
+			throw new Error("gateway: edit delivery requires a ref and adapter edit()");
+		}
+		await new Promise<void>((resolve, reject) => {
+			let settled = false;
+			const timer = this.deps.setTimer(() => {
+				if (settled) return;
+				settled = true;
+				reject(timeoutError(this.deps.timeoutMs));
+			}, this.deps.timeoutMs);
+			this.channel.edit!(entry.ref!, message).then(() => {
+				if (settled) return;
+				settled = true;
+				timer();
+				resolve();
+			}, (error: unknown) => {
+				if (settled) return;
+				settled = true;
+				timer();
+				reject(error);
+			});
+		});
+		return { messageIds: [entry.ref.messageId] };
 	}
 
 	/**

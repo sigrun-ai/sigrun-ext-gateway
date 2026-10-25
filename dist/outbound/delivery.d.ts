@@ -43,6 +43,10 @@ export interface DeliveryDeps {
         delivered(): void;
         failed(): void;
     };
+    /** Persist a delivered interaction prompt's platform refs for edits/replies. */
+    readonly onInteractionReceipt?: (entry: LedgerEntry, receipt: {
+        readonly messageIds: readonly string[];
+    }) => void | Promise<void>;
 }
 /** The pinned resend marker for recovered entries. */
 export declare const RESENT_MARKER = "(resent after restart)";
@@ -98,6 +102,8 @@ export declare class DeliveryWorker {
      * the bound classifies TRANSIENT (the worker retries, never wedges).
      */
     private boundedSend;
+    /** Apply an edit entry; its ledger row carries the target MessageRef. */
+    private boundedEdit;
     /**
      * The classified failure path: transient retries (the ladder),
      * permanent fails at once, chat_gone marks the binding dead.

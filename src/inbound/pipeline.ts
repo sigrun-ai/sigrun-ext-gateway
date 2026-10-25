@@ -42,6 +42,7 @@ import type {
 	SubmissionId,
 } from "@earendil-works/pi-durable";
 import type { ChannelConfig } from "../config.js";
+import type { JsonValue } from "@sigrun/shared/blocks";
 import type { EngineLog } from "../log.js";
 import type { StreamOrigin } from "../outbound/stream.js";
 import { buildEnvelope } from "./envelope.js";
@@ -117,6 +118,13 @@ export interface PipelineDeps {
 	readonly bindings?: BindingStore;
 	/** The injectable stages (§8.4 steps 8, 9). */
 	readonly stages?: PipelineStages;
+	/** Task 9's write-gated interaction answer seam (button taps). */
+	readonly interactionAnswer?: (answer: {
+		readonly conversationId: number;
+		readonly callId: string;
+		readonly values: Record<string, JsonValue>;
+		readonly user: string | undefined;
+	}) => Promise<string>;
 	/** Cross-channel lookup for `/pair` approval notices. Stand-alone
 	 *  pipelines fall back to their own adapter. */
 	readonly channelOf?: (channel: string) => ChannelContribution | undefined;
@@ -824,12 +832,23 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 		config: ChannelConfig,
 	): Promise<void> {
 		const action = access.tokens.resolve(event.data);
-		if (action === undefined || action.kind !== "pair") return;
+		if (action === undefined) return;
 		const tapper = access.identities.userFor(
 			config,
 			channelId,
 			event.sender.id,
 		);
+		if (action.kind === "interaction") {
+			if (deps.interactionAnswer === undefined) return;
+			const reply = await deps.interactionAnswer({
+				conversationId: action.conversationId,
+				callId: action.callId,
+				values: { [action.field ?? "decision"]: action.optionId },
+				user: tapper?.user,
+			});
+			await sendNotice(event.chat, reply, undefined);
+			return;
+		}
 		if (tapper === undefined) {
 			deps.log.once(
 				`tap-unknown:${channelId}:${event.sender.id}`,

@@ -59,6 +59,10 @@ import type { AccessState } from "./inbound/pipeline.js";
 import type { StatusPairingRow } from "./status-route.js";
 import { hashId } from "./log.js";
 import { collectAttachments } from "./inbound/media.js";
+import { PromptStore } from "./interactions/prompts.js";
+import { createInteractionNotifier, onInteractionSettled, type InteractionChatDeps } from "./interactions/chat.js";
+import { answerFromChat, createInteractionAnswerStage } from "./interactions/answer.js";
+import { receiptForInteraction } from "./interactions/receipts.js";
 import type { ToolDeps } from "./tools.js";
 import type { ChannelSectionDeps } from "./section.js";
 
@@ -127,6 +131,11 @@ export interface EngineInternals {
 	): Promise<void>;
 	/** The home-chat notifier and its enqueue-then-kick delivery path. */
 	notifier(): import("@sigrun/sigrun/extension").NotifierContribution;
+	/** Delivered prompt edits and bound-chat outcome notices. */
+	interactionSettled(
+		event: import("@sigrun/sigrun/extension").ExtensionLifecyclePayload["interactionSettled"],
+		context: import("@sigrun/sigrun/extension").HandlerContext,
+	): Promise<void>;
 	/** Agent tools and bound-chat prompt section over the same shared stores. */
 	toolDeps(): ToolDeps;
 	sectionDeps(): ChannelSectionDeps;
@@ -401,6 +410,17 @@ export function createEngine(
 		readConfig: () => readConfig(host),
 		log,
 	});
+	const prompts = new PromptStore(join(gatewayDir, "prompts.json"));
+	const interactionDeps = (): InteractionChatDeps => ({
+		host,
+		bindings,
+		identities: access.identities,
+		prompts,
+		ledger,
+		tokens: access.tokens,
+		channelOf,
+		log,
+	});
 	const kickWorkers = (): void => {
 		for (const worker of workers.values()) worker.kick();
 	};
@@ -472,14 +492,20 @@ export function createEngine(
 			readConfig: () => readConfig(host),
 		}),
 		notifier: () => {
-			const notifier = createNotifier(notifyDeps());
+			const home = createNotifier(notifyDeps());
+			const interactions = createInteractionNotifier(interactionDeps());
 			return {
-				name: notifier.name,
+				name: "gateway",
 				notify: async (event, ctx) => {
-					await notifier.notify(event, ctx);
+					await interactions.notify(event, ctx);
+					await home.notify(event, ctx);
 					kickWorkers();
 				},
 			};
+		},
+		interactionSettled: async (event, context) => {
+			await onInteractionSettled(event, interactionDeps(), context);
+			kickWorkers();
 		},
 		settle: async (
 			event: import("@sigrun/sigrun/extension").RunSettledEvent,
@@ -568,7 +594,19 @@ export function createEngine(
 					bindings,
 					streams,
 					channelOf,
+					interactionAnswer: async (answer) => await answerFromChat(interactionDeps(), answer),
 					stages: {
+						interactionAnswer: createInteractionAnswerStage({
+							...interactionDeps(),
+							configOf: async (channel) => {
+								const live = await readConfig(host);
+								const block = live.channels[channel];
+								return block === undefined || "failed" in block ? undefined : block;
+							},
+							reply: async (event, text) => {
+								await entry.channel.send({ chat: event.chat, text });
+							},
+						}),
 						attachments: async (event) => {
 							const binding = bindings.get(bindingKey(id, event.chat));
 							if (binding === undefined) return { parts: [], notes: [] };
@@ -619,6 +657,9 @@ export function createEngine(
 						failed: () => supervisor.countFailed(),
 					},
 					resolveFiles: (entry) => ledger.resolveFiles(host, entry),
+					onInteractionReceipt: async (entry, receipt) => {
+						await receiptForInteraction(prompts, entry, receipt);
+					},
 				});
 				workers.set(id, worker);
 				// The first attempt settles before start resolves (running

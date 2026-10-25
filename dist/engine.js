@@ -43,6 +43,10 @@ import { SessionMetaDoc } from "./session-meta.js";
 import { StreamRegistry } from "./outbound/stream.js";
 import { hashId } from "./log.js";
 import { collectAttachments } from "./inbound/media.js";
+import { PromptStore } from "./interactions/prompts.js";
+import { createInteractionNotifier, onInteractionSettled } from "./interactions/chat.js";
+import { answerFromChat, createInteractionAnswerStage } from "./interactions/answer.js";
+import { receiptForInteraction } from "./interactions/receipts.js";
 /** The engine's own timer defaults (the real world). */
 function defaultTimers() {
     return {
@@ -278,6 +282,17 @@ export function createEngine(host, deps = {}) {
         readConfig: () => readConfig(host),
         log,
     });
+    const prompts = new PromptStore(join(gatewayDir, "prompts.json"));
+    const interactionDeps = () => ({
+        host,
+        bindings,
+        identities: access.identities,
+        prompts,
+        ledger,
+        tokens: access.tokens,
+        channelOf,
+        log,
+    });
     const kickWorkers = () => {
         for (const worker of workers.values())
             worker.kick();
@@ -342,14 +357,20 @@ export function createEngine(host, deps = {}) {
             readConfig: () => readConfig(host),
         }),
         notifier: () => {
-            const notifier = createNotifier(notifyDeps());
+            const home = createNotifier(notifyDeps());
+            const interactions = createInteractionNotifier(interactionDeps());
             return {
-                name: notifier.name,
+                name: "gateway",
                 notify: async (event, ctx) => {
-                    await notifier.notify(event, ctx);
+                    await interactions.notify(event, ctx);
+                    await home.notify(event, ctx);
                     kickWorkers();
                 },
             };
+        },
+        interactionSettled: async (event, context) => {
+            await onInteractionSettled(event, interactionDeps(), context);
+            kickWorkers();
         },
         settle: async (event, api, context) => {
             // The fan-out runs over the engine's deps, then every LIVE
@@ -424,7 +445,19 @@ export function createEngine(host, deps = {}) {
                     bindings,
                     streams,
                     channelOf,
+                    interactionAnswer: async (answer) => await answerFromChat(interactionDeps(), answer),
                     stages: {
+                        interactionAnswer: createInteractionAnswerStage({
+                            ...interactionDeps(),
+                            configOf: async (channel) => {
+                                const live = await readConfig(host);
+                                const block = live.channels[channel];
+                                return block === undefined || "failed" in block ? undefined : block;
+                            },
+                            reply: async (event, text) => {
+                                await entry.channel.send({ chat: event.chat, text });
+                            },
+                        }),
                         attachments: async (event) => {
                             const binding = bindings.get(bindingKey(id, event.chat));
                             if (binding === undefined)
@@ -467,6 +500,9 @@ export function createEngine(host, deps = {}) {
                         failed: () => supervisor.countFailed(),
                     },
                     resolveFiles: (entry) => ledger.resolveFiles(host, entry),
+                    onInteractionReceipt: async (entry, receipt) => {
+                        await receiptForInteraction(prompts, entry, receipt);
+                    },
                 });
                 workers.set(id, worker);
                 // The first attempt settles before start resolves (running

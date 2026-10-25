@@ -78,4 +78,9 @@ export { GATEWAY_COMMANDS, chatCommandMenu, handleChatCommand, } from "./command
 export type { ChatCommandContext, ChatCommandDeps, GatewayCommand, } from "./commands/chat.js";
 export type { LinkCommand, LinkCommandDeps, LinkDeps, } from "./commands/link.js";
 export { createLog, hashId } from "./log.js";
+export { planInteraction, renderInteraction } from "./interactions/render.js";
+export type { ChatAnswerPlan, RenderInteractionOptions } from "./interactions/render.js";
+export { PromptStore } from "./interactions/prompts.js";
+export { answerFromChat, createInteractionAnswerStage } from "./interactions/answer.js";
+export { createInteractionNotifier, onInteractionSettled } from "./interactions/chat.js";
 export type { EngineLog } from "./log.js";

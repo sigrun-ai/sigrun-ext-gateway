@@ -161,8 +161,13 @@ export class DeliveryWorker {
             // unmarked entry must not be sent — the crash window would
             // duplicate it on recovery).
             await this.ledger.mark(entry.id, "attempting");
-            const receipt = await this.boundedSend(message);
+            const receipt = entry.kind === "edit"
+                ? await this.boundedEdit(entry, message)
+                : await this.boundedSend(message);
             await this.ledger.mark(entry.id, "delivered", receipt.messageIds);
+            if (entry.kind === "interaction") {
+                await this.deps.onInteractionReceipt?.(entry, receipt);
+            }
             this.deps.counts?.delivered();
             return true;
         }
@@ -208,6 +213,35 @@ export class DeliveryWorker {
                 reject(error);
             });
         });
+    }
+    /** Apply an edit entry; its ledger row carries the target MessageRef. */
+    async boundedEdit(entry, message) {
+        if (entry.ref === undefined || this.channel.edit === undefined) {
+            throw new Error("gateway: edit delivery requires a ref and adapter edit()");
+        }
+        await new Promise((resolve, reject) => {
+            let settled = false;
+            const timer = this.deps.setTimer(() => {
+                if (settled)
+                    return;
+                settled = true;
+                reject(timeoutError(this.deps.timeoutMs));
+            }, this.deps.timeoutMs);
+            this.channel.edit(entry.ref, message).then(() => {
+                if (settled)
+                    return;
+                settled = true;
+                timer();
+                resolve();
+            }, (error) => {
+                if (settled)
+                    return;
+                settled = true;
+                timer();
+                reject(error);
+            });
+        });
+        return { messageIds: [entry.ref.messageId] };
     }
     /**
      * The classified failure path: transient retries (the ladder),

@@ -72,6 +72,9 @@ export default function createGateway(host) {
         // unlike the host bridge, it resolves in harness-only embedders
         // without a 30 s wait.
         runSettled: (event, api, context) => engine.settle(event, api, context),
+        interactionSettled: async (event, _api, context) => {
+            await engine.interactionSettled(event, context);
+        },
         // Task 12 owns links as well as homes; Task 13 moves links to core's
         // account table and narrows this cleanup to the home-chat records.
         userDeleted: async ({ user }) => {
@@ -124,3 +127,7 @@ export { runPair } from "./commands/pair.js";
 export { createLinkCommand, redeemLink } from "./commands/link.js";
 export { GATEWAY_COMMANDS, chatCommandMenu, handleChatCommand, } from "./commands/chat.js";
 export { createLog, hashId } from "./log.js";
+export { planInteraction, renderInteraction } from "./interactions/render.js";
+export { PromptStore } from "./interactions/prompts.js";
+export { answerFromChat, createInteractionAnswerStage } from "./interactions/answer.js";
+export { createInteractionNotifier, onInteractionSettled } from "./interactions/chat.js";

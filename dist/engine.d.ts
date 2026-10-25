@@ -94,6 +94,8 @@ export interface EngineInternals {
     settle(event: import("@sigrun/sigrun/extension").RunSettledEvent, api: import("@sigrun/sigrun/extension").MemoryEventApi, context: import("@sigrun/sigrun/extension").HandlerContext): Promise<void>;
     /** The home-chat notifier and its enqueue-then-kick delivery path. */
     notifier(): import("@sigrun/sigrun/extension").NotifierContribution;
+    /** Delivered prompt edits and bound-chat outcome notices. */
+    interactionSettled(event: import("@sigrun/sigrun/extension").ExtensionLifecyclePayload["interactionSettled"], context: import("@sigrun/sigrun/extension").HandlerContext): Promise<void>;
     /** Agent tools and bound-chat prompt section over the same shared stores. */
     toolDeps(): ToolDeps;
     sectionDeps(): ChannelSectionDeps;
