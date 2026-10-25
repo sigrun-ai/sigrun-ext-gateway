@@ -179,6 +179,12 @@ buttons; a later tap reports that outcome rather than answering again.
 Unbound conversations notify each write-access user's home DMs, while
 bound conversations prompt each bound chat once.
 
+**Known gap (secret timing):** a secret interaction answered in the
+webui before the gateway's notifier first runs can lose that one-shot
+secret delivery — the notifier's record read is the delivery-consuming
+read. Answering after the prompt rendered is safe. The durable fix is a
+core-provided non-consuming record read.
+
 ## Delivery, state, and shutdown
 
 Responses stream through adapter edit support where available. Final

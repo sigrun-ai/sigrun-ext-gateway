@@ -349,7 +349,14 @@ describe("prompt delivery and answering", () => {
 		expect(r.prompts.has(7, "call-1", KEY)).toBe(true);
 	});
 
-	test("a late settled notification never consumes the winner's secret delivery", async () => {
+	// The fake host has no delivery table, so "the delivery survives" is
+	// not provable here: what IS provable engine-side is that the late
+	// notifier still performs its single record read ONLY when a prompt is
+	// actually needed (the already-prompted test below pins the zero-read
+	// case). The no-prior-prompt + already-settled race (a webui answer
+	// beating the notifier) remains a known gap until core provides a
+	// non-consuming read — see the README's interactions section.
+	test("a late settled notification does not re-prompt and reads only once", async () => {
 		const r = await rig();
 		const secret = form([{ type: "secret", name: "token", label: "Token" }]);
 		await seedPending(r.host, 7, "call-secret", secret);
