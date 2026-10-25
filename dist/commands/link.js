@@ -14,6 +14,7 @@
  * so the user can remove the conflicting link and send the SAME code.
  */
 import { normalizeCode } from "../access/codes.js";
+import { chatProviderOf } from "../state/identities.js";
 /** The pinned refusal for an unnamed caller (spec §8.2). */
 export const UNNAMED_CALLER = "run this as a named user";
 /** The pinned conflict reply (the code stays live). */
@@ -37,8 +38,10 @@ export async function redeemLink(deps, channel, event) {
         return LINK_CONFLICT_REPLY;
     // Redeem only after the link succeeds: a conflict keeps the code live.
     const redeemed = deps.linkCodes.redeem(code, channel, now);
-    if (redeemed === undefined)
+    if (redeemed === undefined) {
+        deps.log.warn(`self-link for user "${user}" on provider "${chatProviderOf(channel)}" is durable but code redemption failed`);
         return INVALID_CODE_REPLY;
+    }
     deps.log.info(`self-link landed on channel "${channel}" for user "${redeemed}"`);
     return `You are linked to sigrun as ${redeemed}.`;
 }

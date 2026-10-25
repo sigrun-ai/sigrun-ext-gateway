@@ -421,6 +421,26 @@ describe("redeemLink (the /link chat side, pipeline stage 4)", () => {
 		expect(reply2).toContain("You are linked to sigrun as alice");
 	});
 
+	test("a lost redeem after a durable link warns with user and provider", async () => {
+		const rig = await linkRig();
+		const code = rig.codes.issue("alice", "loop", T0);
+		const warnings: string[] = [];
+		const deps: LinkDeps = {
+			...rig.deps,
+			log: { ...silentLog(), warn: (message) => { warnings.push(message); } },
+		};
+		const originalRedeem = rig.codes.redeem.bind(rig.codes);
+		rig.codes.redeem = (...args) => {
+			originalRedeem(...args);
+			return undefined;
+		};
+		expect(await redeemLink(deps, "loop", dmEvent(`/link ${code}`))).toContain("not valid");
+		expect(warnings).toEqual([
+			'self-link for user "alice" on provider "chat:loop" is durable but code redemption failed',
+		]);
+		expect(await rig.host.accounts.lookup("chat:loop", "100000001")).toMatchObject({ user: "alice" });
+	});
+
 	test("an unknown code replies a notice", async () => {
 		const rig = await linkRig();
 		const reply = await redeemLink(rig.deps, "loop", dmEvent("/link ZZZZZZZZ"));

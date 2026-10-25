@@ -4,6 +4,7 @@
  * conversation write access immediately before answering.
  */
 import { bindingKey } from "../state/bindings.js";
+import { chatProviderOf } from "../state/identities.js";
 const TERMINAL = new Set(["answered", "skipped", "expired", "cancelled"]);
 /** Answer after proving the named chat user can still write the conversation. */
 export async function answerFromChat(deps, answer) {
@@ -53,7 +54,7 @@ export function createInteractionAnswerStage(deps) {
         const key = bindingKey(channelId, event.chat);
         const config = await deps.configOf?.(channelId);
         const resolved = config === undefined
-            ? await deps.host.accounts.lookup(`chat:${channelId}`, event.sender.id)
+            ? await deps.host.accounts.lookup(chatProviderOf(channelId), event.sender.id)
             : await deps.identities.userFor(config, channelId, event.sender.id);
         const user = resolved?.user;
         const lookupKeys = user === undefined ? [key] : [key, `user:${user}`];

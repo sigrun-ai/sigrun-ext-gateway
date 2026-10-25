@@ -20,6 +20,7 @@ import type { IdentityStore } from "../state/identities.js";
 import type { LinkCodes } from "../access/link-codes.js";
 import type { ChannelConfig, GatewayConfig } from "../config.js";
 import { normalizeCode } from "../access/codes.js";
+import { chatProviderOf } from "../state/identities.js";
 
 /** The pinned refusal for an unnamed caller (spec §8.2). */
 export const UNNAMED_CALLER = "run this as a named user";
@@ -58,7 +59,12 @@ export async function redeemLink(
 	if (!linked.linked) return LINK_CONFLICT_REPLY;
 	// Redeem only after the link succeeds: a conflict keeps the code live.
 	const redeemed = deps.linkCodes.redeem(code, channel, now);
-	if (redeemed === undefined) return INVALID_CODE_REPLY;
+	if (redeemed === undefined) {
+		deps.log.warn(
+			`self-link for user "${user}" on provider "${chatProviderOf(channel)}" is durable but code redemption failed`,
+		);
+		return INVALID_CODE_REPLY;
+	}
 	deps.log.info(`self-link landed on channel "${channel}" for user "${redeemed}"`);
 	return `You are linked to sigrun as ${redeemed}.`;
 }

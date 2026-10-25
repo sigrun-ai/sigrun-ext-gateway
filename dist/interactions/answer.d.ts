@@ -6,7 +6,7 @@
 import type { JsonValue } from "@sigrun/shared/blocks";
 import type { HandlerContext, InboundEvent, SigrunHost } from "@sigrun/sigrun/extension";
 import { type BindingStore } from "../state/bindings.js";
-import type { IdentityStore } from "../state/identities.js";
+import { type IdentityStore } from "../state/identities.js";
 import type { PromptStore } from "./prompts.js";
 export interface AnswerDeps {
     readonly host: SigrunHost;

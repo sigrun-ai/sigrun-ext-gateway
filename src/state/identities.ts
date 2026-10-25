@@ -16,6 +16,14 @@ import { JsonFile } from "./json-file.js";
 /** How a chat link came to be. */
 export type LinkVia = "pairing" | "self";
 
+/** Core's one provider-key convention for platform senders. */
+export function chatProviderOf(channel: string): string {
+	return `chat:${channel}`;
+}
+
+/** Core admits only this channel-id shape inside a chat provider. */
+export const CHANNEL_ID_PATTERN = /^[a-z0-9][a-z0-9._:-]*$/;
+
 /** One stored home chat row (per user, per channel). */
 interface HomeRow {
 	readonly chat: ChatRef;
@@ -74,7 +82,7 @@ export class IdentityStore {
 			(entry) => entry.sender === senderId,
 		)?.user;
 		if (allowed !== undefined) return { user: allowed, via: "allow" };
-		const linked = await this.host.accounts.lookup(`chat:${channel}`, senderId);
+		const linked = await this.host.accounts.lookup(chatProviderOf(channel), senderId);
 		return linked === undefined ? undefined : { user: linked.user, via: "link" };
 	}
 
@@ -87,7 +95,7 @@ export class IdentityStore {
 		dmChat: ChatRef,
 	): Promise<LinkResult> {
 		try {
-			await this.host.accounts.link(`chat:${channel}`, senderId, user, via);
+			await this.host.accounts.link(chatProviderOf(channel), senderId, user, via);
 		} catch (error) {
 			if (
 				error instanceof Error &&
@@ -97,23 +105,23 @@ export class IdentityStore {
 			}
 			throw error;
 		}
-		await this.file.update((draft) => {
-			delete draft.links;
-			// First link sets the home chat (a later /home moves it).
-			if (draft.homes[user]?.[channel] === undefined) {
-				const perChannel = draft.homes[user] ?? {};
-				perChannel[channel] = { chat: dmChat };
-				draft.homes[user] = perChannel;
-			}
-		}).then((state) => this.reload(state));
-		// The link is already durable in core. A home-write failure must
-		// not roll back that fact in memory: preserve this absent home in
-		// the mirror so the caller's next link attempt cannot be misread
-		// as the first one; the failed write remains loud to the caller.
-		if (this.homes[user]?.[channel] === undefined) {
-			const perChannel = this.homes[user] ?? {};
-			perChannel[channel] = { chat: dmChat };
-			this.homes[user] = perChannel;
+		try {
+			await this.file.update((draft) => {
+				delete draft.links;
+				// First link sets the home chat (a later /home moves it).
+				if (draft.homes[user]?.[channel] === undefined) {
+					const perChannel = draft.homes[user] ?? {};
+					perChannel[channel] = { chat: dmChat };
+					draft.homes[user] = perChannel;
+				}
+			}).then((state) => this.reload(state));
+		} catch (error) {
+			// Core has already durably linked the sender. Preserve this
+			// absent home in memory before rethrowing so homesOf and a
+			// same-user retry do not pretend the first link never happened;
+			// the next successful write persists it.
+			this.rememberHome(user, channel, dmChat);
+			throw error;
 		}
 		return { linked: true };
 	}
@@ -166,5 +174,13 @@ export class IdentityStore {
 	/** Refresh the home mirror from the written state (post-mutation). */
 	private reload(state: IdentitiesFile): void {
 		this.homes = state.homes;
+	}
+
+	/** Preserve an absent home without touching its durable file. */
+	private rememberHome(user: string, channel: string, chat: ChatRef): void {
+		if (this.homes[user]?.[channel] !== undefined) return;
+		const perChannel = this.homes[user] ?? {};
+		perChannel[channel] = { chat };
+		this.homes[user] = perChannel;
 	}
 }

@@ -59,7 +59,7 @@ export { bindingKey, BindingStore } from "./state/bindings.js";
 export type { Binding } from "./state/bindings.js";
 export { SeenSet } from "./state/seen.js";
 export { IdentityStore } from "./state/identities.js";
-export type { LinkVia, ResolvedUser } from "./state/identities.js";
+export type { LinkResult, LinkVia, ResolvedUser } from "./state/identities.js";
 export { buildEnvelope } from "./inbound/envelope.js";
 export { createPipeline } from "./inbound/pipeline.js";
 export type { AccessState, PipelineDeps, PipelineOutcome, PipelineStreams, PipelineStages, Receive, SubmissionOrigin, } from "./inbound/pipeline.js";

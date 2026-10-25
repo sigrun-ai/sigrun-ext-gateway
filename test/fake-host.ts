@@ -538,15 +538,15 @@ export async function createFakeHost(
 			) => {
 				record("accounts.link", provider, subject, user, via);
 				const key = `${provider}:${subject}`;
+				if (!directory.has(user)) {
+					throw new Error(`unknown user "${user}"`);
+				}
 				const existing = accountLinks.get(key);
 				if (existing !== undefined) {
 					if (existing.user === user) return existing;
 					throw new Error(
 						`account_link_conflict: ${provider} is linked to another user`,
 					);
-				}
-				if (!directory.has(user)) {
-					throw new Error(`unknown user "${user}"`);
 				}
 				const row: AccountLinkWire = {
 					provider,

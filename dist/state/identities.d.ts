@@ -12,6 +12,10 @@ import type { ChannelConfig } from "../config.js";
 import type { EngineLog } from "../log.js";
 /** How a chat link came to be. */
 export type LinkVia = "pairing" | "self";
+/** Core's one provider-key convention for platform senders. */
+export declare function chatProviderOf(channel: string): string;
+/** Core admits only this channel-id shape inside a chat provider. */
+export declare const CHANNEL_ID_PATTERN: RegExp;
 /** The result of a `userFor` resolution. */
 export interface ResolvedUser {
     readonly user: string;
@@ -52,4 +56,6 @@ export declare class IdentityStore {
     setHome(user: string, channel: string, chat: ChatRef): Promise<void>;
     /** Refresh the home mirror from the written state (post-mutation). */
     private reload;
+    /** Preserve an absent home without touching its durable file. */
+    private rememberHome;
 }

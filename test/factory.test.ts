@@ -5,12 +5,14 @@
  * and the engine skeleton's `start` creates the state directory.
  */
 
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
 import { createFakeHost, type FakeHost } from "./fake-host.js";
 import createGateway from "../src/index.js";
+import { createEngine } from "../src/engine.js";
+import type { EngineLog } from "../src/log.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterAll(async () => {
@@ -59,6 +61,30 @@ describe("createGateway (the factory)", () => {
 		// the host as that default; the loader only passes the host when
 		// factory.length > 0.
 		expect(createGateway.length).toBe(1);
+	});
+
+	test("engine construction warns about legacy link count", async () => {
+		const host = await fakeHost();
+		const gatewayDir = join(host.stores.paths.state, "gateway");
+		await mkdir(gatewayDir, { recursive: true });
+		await writeFile(join(gatewayDir, "identities.json"), JSON.stringify({
+			links: {
+				"loop:100000001": { user: "alice", via: "self" },
+				"loop:200000002": { user: "bob", via: "pairing" },
+			},
+			homes: {},
+		}));
+		const warnings: string[] = [];
+		const log: EngineLog = {
+			info: () => {},
+			warn: (message) => { warnings.push(message); },
+			error: () => {},
+			debug: () => {},
+			once: () => {},
+		};
+		createEngine(host, { log });
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toContain("2 legacy links");
 	});
 
 	test("start creates the state dir and records the channels; health is ok", async () => {
@@ -121,6 +147,39 @@ describe("createGateway (the factory)", () => {
 		await engine.stopIntake();
 		await engine.stop();
 		expect(engine.health()).toBe("ok");
+	});
+
+	test("start skips a mis-shaped channel id loudly", async () => {
+		const host = await fakeHost();
+		await host.stores.settings.set({ channels: { "Loop Bad": {} } });
+		const warnings: string[] = [];
+		const log: EngineLog = {
+			info: () => {},
+			warn: (message) => { warnings.push(message); },
+			error: () => {},
+			debug: () => {},
+			once: () => {},
+		};
+		const engine = createEngine(host, { log });
+		let starts = 0;
+		await engine.start({
+			channels: [{
+				extension: "fixture",
+				channel: {
+					id: "Loop Bad",
+					label: "Bad",
+					capabilities: { chatTypes: ["dm"], maxMessageLength: 100, format: "markdown" },
+					configured: () => ({ status: "ready" }),
+					start: async () => { starts++; },
+					send: async () => ({ messageIds: [] }),
+				},
+			}],
+			signal: new AbortController().signal,
+		});
+		expect(starts).toBe(0);
+		expect(warnings.some((message) => message.includes('channel "Loop Bad" has an invalid id'))).toBe(true);
+		expect(engine.status().channels["Loop Bad"]?.state).toBe("failed");
+		await engine.stop();
 	});
 
 	test("readConfig reads through the fake host's scoped settings store", async () => {

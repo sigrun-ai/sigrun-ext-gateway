@@ -1,7 +1,7 @@
 /** Core-backed sender identities (Task 13): allowlist precedence, link
  * conflicts, home-only persistence, and legacy-link warnings. */
 
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -97,15 +97,15 @@ describe("IdentityStore over host.accounts", () => {
 		expect(store.homesOf("alice")[0]?.chat.chatId).toBe("200000002");
 	});
 
-	test("a failed home write does not lose the first home on a same-user retry", async () => {
+	test("a failed home write keeps the mirror honest and rethrows", async () => {
 		const { store, dir } = await rig();
 		const path = join(dir, "identities.json");
-		// A directory where the JSON file belongs forces the home write to
-		// fail AFTER core has durably linked the sender.
-		const { mkdir } = await import("node:fs/promises");
+		// A directory where the JSON file belongs rejects the real write
+		// after core has durably linked the sender. Remove it before the
+		// same-user retry so the next durable write can succeed.
 		await mkdir(path);
 		await expect(store.link("loop", "100000001", "alice", "self", CHAT)).rejects.toThrow();
-		const { rm } = await import("node:fs/promises");
+		expect(store.homesOf("alice")).toEqual([{ channel: "loop", chat: CHAT }]);
 		await rm(path, { recursive: true });
 		expect(await store.link("loop", "100000001", "alice", "self", CHAT)).toEqual({ linked: true });
 		expect(store.homesOf("alice")).toEqual([{ channel: "loop", chat: CHAT }]);
@@ -128,6 +128,14 @@ describe("IdentityStore over host.accounts", () => {
 			via: "link",
 		});
 		expect(host.accountLinks()).toHaveLength(1);
+	});
+
+	test("fake host rejects an unknown user before a same-user existing link", async () => {
+		const { host } = await rig();
+		await host.accounts.link("chat:loop", "100000001", "alice", "self");
+		await expect(
+			host.accounts.link("chat:loop", "100000001", "nobody", "self"),
+		).rejects.toThrow('unknown user "nobody"');
 	});
 
 	test("a legacy links object warns once and disappears on the next write", async () => {

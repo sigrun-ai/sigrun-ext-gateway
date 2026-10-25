@@ -48,7 +48,7 @@ import type { PairDeps } from "./commands/pair.js";
 import { createLinkCommand } from "./commands/link.js";
 import { chatCommandMenu } from "./commands/chat.js";
 import { bindingKey, BindingStore } from "./state/bindings.js";
-import { IdentityStore } from "./state/identities.js";
+import { CHANNEL_ID_PATTERN, IdentityStore } from "./state/identities.js";
 import { Ledger } from "./state/ledger.js";
 import { DeliveryWorker } from "./outbound/delivery.js";
 import { onRunSettled, type SettledDeps } from "./outbound/settled.js";
@@ -261,7 +261,7 @@ export function createEngine(
 	// factory time (cheap: the stores load synchronously; no timers, no
 	// I/O beyond the state reads — the pi lifecycle rule holds).
 	const access: AccessState = {
-		identities: new IdentityStore(host, join(gatewayDir, "identities.json")),
+		identities: new IdentityStore(host, join(gatewayDir, "identities.json"), { log }),
 		pairing: new PairingStore(join(gatewayDir, "pairing.json")),
 		linkCodes: new LinkCodes(),
 		tokens: new ButtonTokens(),
@@ -549,6 +549,16 @@ export function createEngine(
 			);
 			for (const entry of channels) {
 				const id = entry.channel.id;
+				// Adapters are the registration boundary: reject an id core
+				// could never place inside chat:<channel>, before any event
+				// reaches the identity store. The failed row makes the skip
+				// visible on the status route as well as in the log.
+				if (!CHANNEL_ID_PATTERN.test(id)) {
+					const detail = `channel "${id}" has an invalid id (expected ${CHANNEL_ID_PATTERN.source})`;
+					staticRows.set(id, staticRow("failed", detail, timers.now()));
+					log.warn(detail);
+					continue;
+				}
 				const block = config.channels[id];
 				if (block === undefined) {
 					// Absent from `channels` = disabled (spec §8.1).

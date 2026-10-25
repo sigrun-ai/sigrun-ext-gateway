@@ -197,9 +197,9 @@ export interface PipelineHandle extends Receive {
 }
 
 /** Build a private access state over `stateDir` (the no-`access` shape). */
-function privateAccess(host: SigrunHost, stateDir: string, now: () => number): AccessState {
+function privateAccess(host: SigrunHost, stateDir: string, now: () => number, log: EngineLog): AccessState {
 	return {
-		identities: new IdentityStore(host, join(stateDir, "identities.json")),
+		identities: new IdentityStore(host, join(stateDir, "identities.json"), { log }),
 		pairing: new PairingStore(join(stateDir, "pairing.json"), { now }),
 		linkCodes: new LinkCodes(),
 		tokens: new ButtonTokens(),
@@ -219,7 +219,7 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 	const seen = new SeenSet(join(deps.stateDir, "seen.json"));
 	const access =
 		deps.access ??
-		privateAccess(deps.host, deps.stateDir, () => now());
+		privateAccess(deps.host, deps.stateDir, () => now(), deps.log);
 	const albums = new AlbumCollector(now, ALBUM_WINDOW_MS);
 	// Per-group close timers (the album window's flush).
 	const albumTimers = new Map<string, ReturnType<typeof setTimeout>>();

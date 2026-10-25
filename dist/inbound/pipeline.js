@@ -45,9 +45,9 @@ const UNSERVED_MODEL_NOTICE = "The model <ref> is not available. Use /model to p
 /** The pinned group refusal for `/link` (spec §8.2, exact copy). */
 const LINK_GROUP_REFUSAL = "send this in a direct message";
 /** Build a private access state over `stateDir` (the no-`access` shape). */
-function privateAccess(host, stateDir, now) {
+function privateAccess(host, stateDir, now, log) {
     return {
-        identities: new IdentityStore(host, join(stateDir, "identities.json")),
+        identities: new IdentityStore(host, join(stateDir, "identities.json"), { log }),
         pairing: new PairingStore(join(stateDir, "pairing.json"), { now }),
         linkCodes: new LinkCodes(),
         tokens: new ButtonTokens(),
@@ -64,7 +64,7 @@ export function createPipeline(deps) {
         new BindingStore(join(deps.stateDir, "bindings.json"), { now });
     const seen = new SeenSet(join(deps.stateDir, "seen.json"));
     const access = deps.access ??
-        privateAccess(deps.host, deps.stateDir, () => now());
+        privateAccess(deps.host, deps.stateDir, () => now(), deps.log);
     const albums = new AlbumCollector(now, ALBUM_WINDOW_MS);
     // Per-group close timers (the album window's flush).
     const albumTimers = new Map();

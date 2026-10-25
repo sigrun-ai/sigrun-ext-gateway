@@ -12,7 +12,7 @@ import type {
 	SigrunHost,
 } from "@sigrun/sigrun/extension";
 import { bindingKey, type BindingStore } from "../state/bindings.js";
-import type { IdentityStore } from "../state/identities.js";
+import { chatProviderOf, type IdentityStore } from "../state/identities.js";
 import type { PromptStore } from "./prompts.js";
 
 export interface AnswerDeps {
@@ -106,7 +106,7 @@ export function createInteractionAnswerStage(
 		const key = bindingKey(channelId, event.chat);
 		const config = await deps.configOf?.(channelId);
 		const resolved = config === undefined
-			? await deps.host.accounts.lookup(`chat:${channelId}`, event.sender.id)
+			? await deps.host.accounts.lookup(chatProviderOf(channelId), event.sender.id)
 			: await deps.identities.userFor(config, channelId, event.sender.id);
 		const user = resolved?.user;
 		const lookupKeys = user === undefined ? [key] : [key, `user:${user}`];
