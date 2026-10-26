@@ -34,5 +34,6 @@ jobs:
     secrets: inherit
     with:
       needs-core: true
+      tag: ${{ inputs.tag || '' }}
       dry-run: ${{ inputs.dry-run || false }}
       dry-run-ref: ${{ inputs.ref || '' }}
