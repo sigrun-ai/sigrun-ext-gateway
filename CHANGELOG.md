@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-27
+### Fixed
+- First real publish. `0.1.0` was registered with the npm name bootstrap but
+  never published: a staged `0.1.0` entry (left by the bootstrap) made the
+  registry reject the release with `E409 Cannot publish over previously
+  staged version`. Rejecting that entry removed the package name entirely,
+  so the name was re-bootstrapped and `0.1.1` published past it. The package
+  contents are the 0.1.0 contents plus the `@sigrun/shared` 0.2.0 peer.
+
+### Changed
+- `@sigrun/shared` peer follows the family 0.2.0 cut.
+
 ## [0.1.0] - 2026-10-23
 ### Added
 - Channel supervision with retry/backoff, adapter status and pairing
