@@ -130,8 +130,25 @@ export declare class Ledger {
      * Returns whether this call cancelled the pending entry.
      */
     cancel(id: string): Promise<boolean>;
-    /** Transition one entry's state (attempting/delivered/failed). */
-    mark(id: string, state: LedgerState, receipt?: readonly string[]): Promise<void>;
+    /**
+     * Whether a transition may leave the entry's current state. The rule
+     * this exists for is narrow and deliberate: `cancelled` is TERMINAL,
+     * so a cancelled entry can never be resurrected by a late `mark` —
+     * that is what makes `cancel` a barrier rather than a request, and it
+     * is what stops a settlement-cancelled interaction prompt from being
+     * delivered anyway. Every other edge stays permissive, because the
+     * ledger is a state MACHINE with legitimate direct transitions
+     * (`pending → delivered` for a single-attempt success,
+     * `attempting → pending` for the retry ladder, `pending → failed`).
+     */
+    private static canLeave;
+    /**
+     * Transition one entry's state (attempting/delivered/failed). A
+     * transition out of `cancelled` is refused, and a refused transition
+     * reports `false` so the caller can stop before acting on the entry
+     * (the delivery worker must not send an entry it failed to claim).
+     */
+    mark(id: string, state: LedgerState, receipt?: readonly string[]): Promise<boolean>;
     /**
      * Restart recovery: every `attempting` entry becomes `pending` with
      * the `recovered` flag (the worker prefixes the marker at send time).

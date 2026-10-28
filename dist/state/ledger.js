@@ -108,13 +108,36 @@ export class Ledger {
         this.entries = state.entries;
         return cancelled;
     }
-    /** Transition one entry's state (attempting/delivered/failed). */
+    /**
+     * Whether a transition may leave the entry's current state. The rule
+     * this exists for is narrow and deliberate: `cancelled` is TERMINAL,
+     * so a cancelled entry can never be resurrected by a late `mark` —
+     * that is what makes `cancel` a barrier rather than a request, and it
+     * is what stops a settlement-cancelled interaction prompt from being
+     * delivered anyway. Every other edge stays permissive, because the
+     * ledger is a state MACHINE with legitimate direct transitions
+     * (`pending → delivered` for a single-attempt success,
+     * `attempting → pending` for the retry ladder, `pending → failed`).
+     */
+    static canLeave(from, to) {
+        return from !== "cancelled" || to === "cancelled";
+    }
+    /**
+     * Transition one entry's state (attempting/delivered/failed). A
+     * transition out of `cancelled` is refused, and a refused transition
+     * reports `false` so the caller can stop before acting on the entry
+     * (the delivery worker must not send an entry it failed to claim).
+     */
     async mark(id, state, receipt) {
+        let applied = false;
         await this.file.update((draft) => {
             const index = draft.entries.findIndex((row) => row.id === id);
             if (index === -1)
                 return;
             const row = draft.entries[index];
+            if (!Ledger.canLeave(row.state, state))
+                return;
+            applied = true;
             const next = {
                 ...row,
                 state,
@@ -129,6 +152,7 @@ export class Ledger {
             draft.entries[index] = next;
             this.entries = draft.entries;
         });
+        return applied;
     }
     /**
      * Restart recovery: every `attempting` entry becomes `pending` with

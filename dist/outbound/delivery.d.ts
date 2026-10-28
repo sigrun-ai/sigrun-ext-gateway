@@ -42,6 +42,7 @@ export interface DeliveryDeps {
     readonly counts?: {
         delivered(): void;
         failed(): void;
+        cancelled?(): void;
     };
     /** Persist a delivered interaction prompt's platform refs for edits/replies. */
     readonly onInteractionReceipt?: (entry: LedgerEntry, receipt: {

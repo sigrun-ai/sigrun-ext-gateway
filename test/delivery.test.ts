@@ -579,3 +579,57 @@ describe("DeliveryWorker stop", () => {
 		expect(harness.channel.sent).toHaveLength(0);
 	});
 });
+
+describe("cancellation is a barrier, not a request (final-review P1)", () => {
+	// A settlement can cancel an already-enqueued interaction prompt between
+	// the worker reading it as pending and the worker claiming it. If the
+	// claim is not guarded, the worker sends a LIVE prompt for a decision
+	// that was already made, and no receipt can heal it.
+	test("a claim refused after cancellation never sends", async () => {
+		const harness = await rig();
+		const id = await enqueueFinal(harness, "should never be sent");
+
+		// Read the pending entry exactly as the loop does, then let a
+		// settlement win the race before the worker claims it.
+		const pending = harness.ledger.nextPending("loop");
+		expect(pending?.id).toBe(id);
+		expect(await harness.ledger.cancel(id)).toBe(true);
+
+		// The worker's claim is refused, so nothing reaches the platform.
+		expect(await harness.ledger.mark(id, "attempting")).toBe(false);
+		harness.worker.kick();
+		await harness.clock.advance(0);
+		expect(harness.channel.sent).toHaveLength(0);
+	});
+
+	test("a cancelled entry can never be resurrected by a later mark", async () => {
+		const harness = await rig();
+		const id = await enqueueFinal(harness, "cancelled");
+		expect(await harness.ledger.cancel(id)).toBe(true);
+
+		// Every transition out of `cancelled` is refused, including the two
+		// that would let a worker deliver it anyway.
+		expect(await harness.ledger.mark(id, "attempting")).toBe(false);
+		expect(await harness.ledger.mark(id, "delivered", ["m-1"])).toBe(false);
+		expect(await harness.ledger.mark(id, "failed")).toBe(false);
+		expect(await harness.ledger.mark(id, "pending")).toBe(false);
+
+		const entry = harness.ledger.nextPending("loop");
+		expect(entry).toBeUndefined();
+		harness.worker.kick();
+		await harness.clock.advance(0);
+		expect(harness.channel.sent).toHaveLength(0);
+	});
+
+	test("the legitimate direct transitions still apply", async () => {
+		const harness = await rig();
+		// `pending → delivered` (a single-attempt success) stays legal.
+		const direct = await enqueueFinal(harness, "direct");
+		expect(await harness.ledger.mark(direct, "delivered", ["m-1"])).toBe(true);
+
+		// `pending → attempting → pending` (the retry ladder) stays legal.
+		const retried = await enqueueFinal(harness, "retried");
+		expect(await harness.ledger.mark(retried, "attempting")).toBe(true);
+		expect(await harness.ledger.mark(retried, "pending")).toBe(true);
+	});
+});

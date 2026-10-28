@@ -41,7 +41,7 @@ export interface DeliveryDeps {
 	/** Re-read file bytes at send time; ledger entries persist paths only. */
 	readonly resolveFiles?: (entry: LedgerEntry) => Promise<OutboundMessage["files"]>;
 	/** Terminal delivery outcomes for the channel's status counters. */
-	readonly counts?: { delivered(): void; failed(): void };
+	readonly counts?: { delivered(): void; failed(): void; cancelled?(): void };
 	/** Persist a delivered interaction prompt's platform refs for edits/replies. */
 	readonly onInteractionReceipt?: (
 		entry: LedgerEntry,
@@ -184,7 +184,14 @@ export class DeliveryWorker {
 			// failing ledger write is LOGGED and the send does not run (an
 			// unmarked entry must not be sent — the crash window would
 			// duplicate it on recovery).
-			await this.ledger.mark(entry.id, "attempting");
+			// A refused claim means the entry is no longer pending (a
+			// settlement cancelled it between the loop's read and here).
+			// Sending it anyway would deliver a live prompt for a decided
+			// interaction, so stop: the cancellation is the barrier.
+			if (!(await this.ledger.mark(entry.id, "attempting"))) {
+				this.deps.counts?.cancelled?.();
+				return true;
+			}
 			const receipt = entry.kind === "edit"
 				? await this.boundedEdit(entry, message)
 				: await this.boundedSend(message);
