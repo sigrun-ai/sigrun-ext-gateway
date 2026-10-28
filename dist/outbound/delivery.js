@@ -277,8 +277,8 @@ export class DeliveryWorker {
             }
             this.deps.log.warn(`delivery: chat gone for "${entry.channel}:${hashId(entry.chat.chatId)}" — binding marked dead`);
             this.deps.log.debug(`delivery: chat gone for "${entry.channel}:${entry.chat.chatId}" — binding marked dead`);
-            await this.markLedger(entry.id, "failed");
-            this.deps.counts?.failed();
+            if (await this.markLedger(entry.id, "failed"))
+                this.deps.counts?.failed();
             return true;
         }
         if (kind === "permanent") {
@@ -287,8 +287,8 @@ export class DeliveryWorker {
                 : "";
             this.deps.log.error(`delivery: permanent failure ("${entry.kind}" to "${hashId(entry.chat.chatId)}")${fileDetail}`, error);
             this.deps.log.debug(`delivery: permanent failure ("${entry.kind}" to "${entry.chat.chatId}")${fileDetail}`);
-            await this.markLedger(entry.id, "failed");
-            this.deps.counts?.failed();
+            if (await this.markLedger(entry.id, "failed"))
+                this.deps.counts?.failed();
             return true;
         }
         // Transient: the retry ladder. attempts was already incremented by
@@ -298,8 +298,8 @@ export class DeliveryWorker {
         if (retriesUsed >= this.deps.delays.length) {
             this.deps.log.error(`delivery: retries exhausted ("${entry.kind}" to "${hashId(entry.chat.chatId)}"): ${detail}`);
             this.deps.log.debug(`delivery: retries exhausted ("${entry.kind}" to "${entry.chat.chatId}"): ${detail}`);
-            await this.markLedger(entry.id, "failed");
-            this.deps.counts?.failed();
+            if (await this.markLedger(entry.id, "failed"))
+                this.deps.counts?.failed();
             return true;
         }
         const delay = this.deps.delays[retriesUsed] ?? 0;
@@ -307,7 +307,10 @@ export class DeliveryWorker {
         // The entry returns to pending (the retry re-pulls it); the timer
         // re-kicks the loop. A stop cancels the timer — the entry stays
         // pending for the next boot's recovery.
-        await this.markLedger(entry.id, "pending");
+        // A refused re-arm means the entry was cancelled while we were
+        // classifying the failure: do not arm a retry that would re-pull it.
+        if (!(await this.markLedger(entry.id, "pending")))
+            return true;
         if (this.stopped)
             return false;
         this.cancelRetry?.();
@@ -317,13 +320,20 @@ export class DeliveryWorker {
         }, delay);
         return false;
     }
-    /** A ledger mark with its own error isolation (never throws). */
+    /**
+     * A ledger mark with its own error isolation (never throws). Returns
+     * whether the transition APPLIED: a refusal means the entry left
+     * `pending` behind our back (a settlement cancelled it), so the caller
+     * must skip its failure/retry side effects rather than count a failure
+     * for a cancelled entry or arm a retry that re-pulls it.
+     */
     async markLedger(id, state) {
         try {
-            await this.ledger.mark(id, state);
+            return await this.ledger.mark(id, state);
         }
         catch (markError) {
             this.deps.log.error("delivery: ledger mark failed", markError);
+            return false;
         }
     }
     /**

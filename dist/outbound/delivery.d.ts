@@ -111,7 +111,13 @@ export declare class DeliveryWorker {
      * Returns false when a retry wait was armed (the caller parks).
      */
     private onSendError;
-    /** A ledger mark with its own error isolation (never throws). */
+    /**
+     * A ledger mark with its own error isolation (never throws). Returns
+     * whether the transition APPLIED: a refusal means the entry left
+     * `pending` behind our back (a settlement cancelled it), so the caller
+     * must skip its failure/retry side effects rather than count a failure
+     * for a cancelled entry or arm a retry that re-pulls it.
+     */
     private markLedger;
     /**
      * The classification read (adapter's `classifyError` when present,

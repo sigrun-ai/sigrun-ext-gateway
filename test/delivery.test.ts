@@ -585,21 +585,45 @@ describe("cancellation is a barrier, not a request (final-review P1)", () => {
 	// the worker reading it as pending and the worker claiming it. If the
 	// claim is not guarded, the worker sends a LIVE prompt for a decision
 	// that was already made, and no receipt can heal it.
-	test("a claim refused after cancellation never sends", async () => {
-		const harness = await rig();
-		const id = await enqueueFinal(harness, "should never be sent");
+	test("the WORKER's claim is refused when a settlement cancels mid-flight", async () => {
+		// Drive the real worker into its refused-claim branch: resolveFiles
+		// runs INSIDE sendOne, after the loop selected the entry and BEFORE
+		// the claim. Pausing there lets a settlement cancel the entry in the
+		// exact window the fix guards, so deleting the guard in sendOne makes
+		// this test send a live prompt and fail.
+		let release: (() => void) | undefined;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		let entered: (() => void) | undefined;
+		const reached = new Promise<void>((resolve) => { entered = resolve; });
+		const harness = await rig(fakeChannel(), async () => {
+			entered?.();
+			await gate;
+			return [];
+		});
+		// resolveFiles runs only for an entry that CARRIES files, so this
+		// enqueue must supply one for the gate to be reached at all.
+		const entry = await harness.ledger.enqueue({
+			channel: "loop",
+			bindingKey: KEY,
+			chat: CHAT,
+			kind: "final",
+			message: { chat: CHAT, text: "should never be sent" },
+			// The file RECORDS are a sibling of `message` on the input: the
+			// ledger serializes paths, never bytes.
+			files: [{ conversationId: 1, path: "uploads/1/held.txt", name: "held.txt" }],
+		});
+		expect(entry).toBeDefined();
+		const id = entry!.id;
 
-		// Read the pending entry exactly as the loop does, then let a
-		// settlement win the race before the worker claims it.
-		const pending = harness.ledger.nextPending("loop");
-		expect(pending?.id).toBe(id);
-		expect(await harness.ledger.cancel(id)).toBe(true);
-
-		// The worker's claim is refused, so nothing reaches the platform.
-		expect(await harness.ledger.mark(id, "attempting")).toBe(false);
 		harness.worker.kick();
+		await reached;                       // worker is now pre-claim
+		expect(await harness.ledger.cancel(id)).toBe(true);
+		release?.();
 		await harness.clock.advance(0);
+
+		// No send, and the queue still progresses (a refused claim is not a park).
 		expect(harness.channel.sent).toHaveLength(0);
+		expect(harness.ledger.nextPending("loop")).toBeUndefined();
 	});
 
 	test("a cancelled entry can never be resurrected by a later mark", async () => {
