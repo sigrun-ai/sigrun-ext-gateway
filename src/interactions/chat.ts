@@ -104,6 +104,16 @@ async function notifyInteraction(
 		// The ledger enqueue precedes the prompt row: the ledger tag is
 		// the durable dedupe, so a throwing enqueue must NOT leave a row
 		// that would suppress this target on every replay.
+		// Re-check per target immediately before its enqueue: rendering
+		// and meta lookups await, and a settle in that window must not
+		// deliver another live prompt. markEnqueued independently checks
+		// the durable call-level settlement marker as the final guard.
+		const current = await deps.host.peekInteraction(
+			event.conversationId as ConversationId,
+			event.callId,
+			context,
+		);
+		if (current === undefined || current.status !== "pending") return;
 		await deps.ledger.enqueue({
 			channel: target.channel,
 			...(target.bindingKey === undefined ? {} : { bindingKey: target.bindingKey }),

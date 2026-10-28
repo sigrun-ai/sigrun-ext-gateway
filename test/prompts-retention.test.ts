@@ -236,7 +236,7 @@ describe("delayed receipts around pruning (spec §3)", () => {
 		expect(r.store.settledOutcome(7, "call-1", KEY)).toBe("answered: allow");
 	});
 
-	test("a settled-but-never-recorded identity still tombstones (settle with no rows)", async () => {
+	test("a settled empty-ref row still tombstones after pruning", async () => {
 		const r = await rig();
 		await r.store.markEnqueued(7, "call-1", KEY, PLAN);
 		await r.store.settle(7, "call-1", "cancelled");
@@ -245,6 +245,20 @@ describe("delayed receipts around pruning (spec §3)", () => {
 		await r.store.recordReceipt(7, "call-1", KEY, CHAT, ["loop-late"]);
 		expect(r.store.has(7, "call-1", KEY)).toBe(false);
 		expect(r.store.settledOutcome(7, "call-1", KEY)).toBe("cancelled");
+	});
+
+	test("settlement with literally no rows blocks a later row for that call", async () => {
+		const r = await rig();
+		await r.store.settle(7, "call-1", "answered: allow");
+		await r.store.markEnqueued(7, "call-1", KEY, PLAN);
+		await r.store.recordReceipt(7, "call-1", KEY, CHAT, ["loop-late"]);
+		expect(r.store.has(7, "call-1", KEY)).toBe(false);
+		expect(r.store.pendingInChat(KEY)).toEqual([]);
+		expect(r.store.settledOutcome(7, "call-1", KEY)).toBe("answered: allow");
+		r.clock.now = T0 + WEEK + 1;
+		await r.store.settle(7, "call-1", "answered: allow");
+		const persisted = JSON.parse(await readFile(r.path, "utf8"));
+		expect(persisted.settled["7:call-1:"]).toEqual({ at: T0, outcome: "answered: allow" });
 	});
 });
 

@@ -113,6 +113,13 @@ export class PromptStore {
 		const state = await this.file.update((draft) => {
 			const identity = `${conversationId}:${callId}:${key}`;
 			const tombstone = draft.settled[identity];
+			const existing = draft.prompts.find((row) => identityOf(row) === identity);
+			// Settlement is CALL-scoped, not only row-scoped. A settlement
+			// landing before the first row exists still records a marker;
+			// otherwise a later fan-out/receipt could create an answerable
+			// prompt for an already-settled interaction. A real receipt may
+			// still install refs on a surviving row for the settlement edit.
+			if (existing === undefined && draft.settled[`${conversationId}:${callId}:`] !== undefined) return;
 			if (tombstone !== undefined) {
 				// A settlement raced this record. An EMPTY ref never replaces
 				// a delivered one; a REAL ref still installs while the row
@@ -123,9 +130,6 @@ export class PromptStore {
 				if (ref.messageId === "") return;
 				if (existing.ref.messageId !== "") return;
 			}
-			const existing = draft.prompts.find((row) =>
-				row.conversationId === conversationId && row.callId === callId && row.key === key
-			);
 			const next: PromptRow = { conversationId, callId, key, ref, plan };
 			if (existing === undefined) draft.prompts.push(next);
 			else draft.prompts[draft.prompts.indexOf(existing)] = next;
@@ -210,9 +214,12 @@ export class PromptStore {
 	/** Retire pending answers; the refs stay until retention expires them. */
 	async settle(conversationId: number, callId: string, outcome = "answered"): Promise<void> {
 		const state = await this.file.update((draft) => {
-			const keys = draft.prompts
-				.filter((row) => row.conversationId === conversationId && row.callId === callId)
-				.map(identityOf);
+			const keys = [
+				`${conversationId}:${callId}:`,
+				...draft.prompts
+					.filter((row) => row.conversationId === conversationId && row.callId === callId)
+					.map(identityOf),
+			];
 			for (const identity of keys) {
 				// Re-settling an already-settled interaction keeps the FIRST
 				// settlement's timestamp and outcome: retention is measured
@@ -233,7 +240,8 @@ export class PromptStore {
 	 * pruning even when no editable ref remains.
 	 */
 	settledOutcome(conversationId: number, callId: string, key: string): string | undefined {
-		return this.settled[`${conversationId}:${callId}:${key}`]?.outcome;
+		return this.settled[`${conversationId}:${callId}:${key}`]?.outcome
+			?? this.settled[`${conversationId}:${callId}:`]?.outcome;
 	}
 }
 
@@ -309,5 +317,8 @@ function validIdentity(identity: string): boolean {
 	if (!/^[1-9][0-9]*$/.test(identity.slice(0, separator))) return false;
 	const rest = identity.slice(separator + 1);
 	const second = rest.indexOf(":");
-	return second > 0 && second < rest.length - 1;
+	// The empty key is the call-level settlement marker, written when
+	// settlement precedes prompt-row creation.
+	if (second === rest.length - 1) return true;
+	return second > 0;
 }

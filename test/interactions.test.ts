@@ -579,6 +579,39 @@ describe("prompt delivery and answering", () => {
 		expect(r.ledger.list().filter((entry) => entry.kind === "notice")).toHaveLength(1);
 	});
 
+	test("a receipt after retention pruning enqueues zero edits and zero notices", async () => {
+		const r = await rig();
+		const now = Date.now();
+		const prunable = new PromptStore(join(r.host.stores.paths.state, "gateway", "prompts.json"), {
+			now: () => now,
+		});
+		(r.deps as { prompts: PromptStore }).prompts = prunable;
+		await r.bindings.bind(KEY, 7, CHAT);
+		await prunable.markEnqueued(7, "call-pruned", KEY, { kind: "webui" });
+		await onInteractionSettled({ conversationId: 7 as never, callId: "call-pruned", kind: "gate.ask", status: "answered", answer: { decision: "allow" } }, r.deps, CONTEXT);
+		for (const entry of r.ledger.list()) {
+			if (entry.state !== "delivered") await r.ledger.mark(entry.id, "delivered");
+		}
+		await r.ledger.prune(now + 8 * 24 * 3_600_000);
+		await prunable.settle(7, "call-pruned", "answered: allow");
+		const { receiptForInteraction } = await import("../src/interactions/receipts.js");
+		await receiptForInteraction(r.prompts, {
+			id: "entry-pruned",
+			channel: "loop",
+			bindingKey: KEY,
+			chat: CHAT,
+			kind: "interaction",
+			message: { chat: CHAT, text: "prompt" },
+			state: "delivered",
+			attempts: 1,
+			createdAt: 0,
+			stateSince: 0,
+			tag: `interaction:7:call-pruned:${KEY}`,
+		}, { messageIds: ["loop-late"] }, r.deps);
+		expect(r.ledger.list().filter((entry) => entry.kind === "edit")).toHaveLength(0);
+		expect(r.ledger.list().filter((entry) => entry.kind === "notice")).toHaveLength(0);
+	});
+
 	// F2: the ledger enqueue precedes the prompt row, so a throwing
 	// enqueue never permanently suppresses a prompt target on replay.
 	test("a throwing ledger enqueue does not record the prompt row", async () => {
@@ -622,6 +655,23 @@ describe("prompt delivery and answering", () => {
 			title: "Sigrun needs you", body: "Approval",
 		}, { host: r.host });
 		expect(r.ledger.list().filter((entry) => entry.kind === "interaction")).toHaveLength(0);
+		expect(r.prompts.has(7, "call-1", KEY)).toBe(false);
+	});
+
+	test("a settlement during the meta/enqueue window leaves no answerable row", async () => {
+		const r = await rig();
+		await r.bindings.bind(KEY, 7, CHAT);
+		await seedPending(r.host);
+		const meta = r.host.conversations.meta.bind(r.host.conversations);
+		r.host.conversations.meta = async (...args: Parameters<typeof meta>) => {
+			await r.prompts.settle(7, "call-1", "answered: allow");
+			return meta(...args);
+		};
+		await createInteractionNotifier(r.deps).notify({
+			type: "interaction.pending", conversationId: 7, callId: "call-1", user: "alice",
+			title: "Sigrun needs you", body: "Approval",
+		}, { host: r.host });
+		expect(r.prompts.pendingInChat(KEY)).toEqual([]);
 		expect(r.prompts.has(7, "call-1", KEY)).toBe(false);
 	});
 });

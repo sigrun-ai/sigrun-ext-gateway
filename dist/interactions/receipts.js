@@ -53,6 +53,13 @@ async function healSettledPrompt(prompts, deps, conversationId, callId, key, mes
     const outcome = prompts.settledOutcome(conversationId, callId, key);
     if (outcome === undefined)
         return;
+    // Tombstones outlive their bulky rows. A receipt AFTER pruning must
+    // be a true no-op: with no surviving row/ref, the settlement helper
+    // would otherwise take its fallback and enqueue duplicate notices.
+    const ref = prompts.refsOf(conversationId, callId)
+        .find((candidate) => candidate.messageId === messageIds[0]);
+    if (ref === undefined)
+        return;
     try {
         await enqueueSettlementEdits(deps, conversationId, callId, outcome);
     }
