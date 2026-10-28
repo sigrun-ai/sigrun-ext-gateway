@@ -39,14 +39,16 @@ async function notifyInteraction(event, deps) {
             targets.push({ key: `user:${event.user}`, channel: home.channel, chat: home.chat });
         }
     }
-    // Resolve and dedupe targets BEFORE reading the record. snapshotInteraction
-    // consumes a settled secret's one-shot delivery, even when we then return.
-    // Final-review follow-up: core should offer a non-consuming snapshot read.
+    // Resolve and dedupe targets BEFORE reading the record. The read is a
+    // PEEK: the gateway owns NO secret delivery (secret records are
+    // webui-plan), so it must never consume one — peekInteraction is the
+    // non-consuming inspection read (a settled secret's one-shot delivery
+    // belongs to the owning extension's snapshotInteraction alone).
     const pendingTargets = targets.filter((target) => !deps.prompts.has(event.conversationId, event.callId, target.key));
     if (pendingTargets.length === 0)
         return;
     const context = deps.context ?? { abortSignal: new AbortController().signal };
-    const record = await deps.host.snapshotInteraction(event.conversationId, event.callId, context);
+    const record = await deps.host.peekInteraction(event.conversationId, event.callId, context);
     if (record === undefined || record.status !== "pending")
         return;
     for (const target of pendingTargets) {

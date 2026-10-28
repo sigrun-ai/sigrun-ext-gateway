@@ -29,6 +29,7 @@ import type {
 	SigrunHost,
 } from "@sigrun/sigrun/extension";
 import type { SubmissionId, ConversationId } from "@earendil-works/pi-durable";
+import type { SessionMeta } from "@sigrun/shared/session-meta";
 import type { ChannelConfig } from "../config.js";
 import type { BindingStore } from "../state/bindings.js";
 import type { Ledger } from "../state/ledger.js";
@@ -66,17 +67,21 @@ export interface Streams {
 	abandon(conversationId: number): void;
 }
 
+/**
+ * The job-delivery metadata the settled fan-out reads. Derived from the
+ * canonical shared session-meta wire type (type-only: no runtime core
+ * dependency) so field drift fails the contract fixture's typecheck.
+ */
+export type GatewayJobMeta = Pick<
+	SessionMeta,
+	"owner" | "name" | "autoName" | "jobId" | "deliver"
+>;
+
 /** onRunSettled's injectable dependencies. */
 export interface SettledDeps {
 	readonly host: SigrunHost;
 	/** The event bus's bridge-free document read (factory-supplied). */
-	readonly readMeta?: (conversationId: number) => Promise<{
-		readonly owner?: string;
-		readonly name?: string;
-		readonly autoName?: string;
-		readonly jobId?: string;
-		readonly deliver?: string[];
-	} | undefined>;
+	readonly readMeta?: (conversationId: number) => Promise<GatewayJobMeta | undefined>;
 	/** The engine-wide bindings (the delivery fan-out read). */
 	readonly bindings: BindingStore;
 	/** The engine-wide identity links (the binding's user resolution). */
