@@ -19,8 +19,8 @@ export declare function createInteractionNotifier(deps: InteractionChatDeps): No
 /** Enqueue outcome edits/notices and retire numbered/reply-to matching. */
 export declare function onInteractionSettled(event: ExtensionLifecyclePayload["interactionSettled"], deps: InteractionChatDeps, context: HandlerContext): Promise<void>;
 /**
- * Enqueue the settlement edits (or, when no ref is editable, the
- * fallback outcome notices). Called at settlement AND from the receipt
+ * Enqueue settlement edits and per-binding fallback outcome notices
+ * (a binding without an editable ref gets a notice). Called at settlement AND from the receipt
  * path when a real delivery ref arrives for an ALREADY-settled prompt:
  * settlement that beats the receipt leaves no editable ref, so the
  * late receipt is the last chance to replace the live buttons.

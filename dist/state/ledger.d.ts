@@ -36,7 +36,7 @@ export interface SerializedOutbound {
     }[];
 }
 /** One ledger row's lifecycle. */
-export type LedgerState = "pending" | "attempting" | "delivered" | "failed";
+export type LedgerState = "pending" | "attempting" | "delivered" | "failed" | "cancelled";
 /** What the entry is for (the worker's send-shape discrimination). */
 export type LedgerKind = "final" | "notice" | "interaction" | "edit";
 /**
@@ -123,6 +123,13 @@ export declare class Ledger {
      * (the worker's loop is a tick, not an await point).
      */
     nextPending(channel: string): LedgerEntry | undefined;
+    /**
+     * Cancel an entry that has not started delivery. The transition is
+     * atomic with the ledger write: an attempting/delivered entry cannot
+     * be cancelled after the platform may already have received it.
+     * Returns whether this call cancelled the pending entry.
+     */
+    cancel(id: string): Promise<boolean>;
     /** Transition one entry's state (attempting/delivered/failed). */
     mark(id: string, state: LedgerState, receipt?: readonly string[]): Promise<void>;
     /**

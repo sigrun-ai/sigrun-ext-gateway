@@ -658,6 +658,66 @@ describe("prompt delivery and answering", () => {
 		expect(r.prompts.has(7, "call-1", KEY)).toBe(false);
 	});
 
+	test("a settlement inside ledger.enqueue cancels the lost prompt reservation before delivery", async () => {
+		const r = await rig();
+		await r.bindings.bind(KEY, 7, CHAT);
+		await seedPending(r.host);
+		const enqueue = r.ledger.enqueue.bind(r.ledger);
+		r.ledger.enqueue = async (entry) => {
+			const queued = await enqueue(entry);
+			if (entry.kind === "interaction") {
+				await onInteractionSettled({
+					conversationId: 7 as never,
+					callId: "call-1",
+					kind: "gate.ask",
+					status: "answered",
+					answer: { decision: "allow" },
+				}, r.deps, CONTEXT);
+			}
+			return queued;
+		};
+		await promptOne(r);
+		const prompt = r.ledger.list().find((entry) => entry.kind === "interaction");
+		expect(prompt?.state).toBe("cancelled");
+		expect(r.prompts.has(7, "call-1", KEY)).toBe(false);
+		await r.deliver();
+		expect(r.channel.sent.filter((message) => message.text.includes("Allow the gated tool call?"))).toHaveLength(0);
+		expect(r.ledger.list().filter((entry) => entry.kind === "notice")).toHaveLength(1);
+	});
+
+	test("mixed editable and non-editable bindings each receive their settlement outcome", async () => {
+		const r = await rig();
+		const otherChat = { chatId: "300000003", chatType: "dm" } as const;
+		const otherKey = bindingKey("plain", otherChat);
+		await r.bindings.bind(KEY, 7, CHAT);
+		await r.bindings.bind(otherKey, 7, otherChat);
+		await r.prompts.record(7, "call-mixed", KEY, { chat: CHAT, messageId: "loop-1" }, { kind: "webui" });
+		await r.prompts.record(7, "call-mixed", otherKey, { chat: otherChat, messageId: "plain-1" }, { kind: "webui" });
+		const plain: ChannelContribution = {
+			id: "plain",
+			label: "Plain",
+			capabilities: caps({ edit: undefined }),
+			configured: () => ({ status: "ready" }),
+			start: async () => {},
+			send: async () => ({ messageIds: ["plain-2"] }),
+		};
+		const deps = { ...r.deps, channelOf: (id: string) => id === "loop" ? r.channel : id === "plain" ? plain : undefined };
+		await onInteractionSettled({
+			conversationId: 7 as never,
+			callId: "call-mixed",
+			kind: "gate.ask",
+			status: "answered",
+			answer: { decision: "allow" },
+		}, deps, CONTEXT);
+		const entries = r.ledger.list();
+		expect(entries.filter((entry) => entry.kind === "edit")).toHaveLength(1);
+		expect(entries.find((entry) => entry.kind === "edit")?.bindingKey).toBe(KEY);
+		const notices = entries.filter((entry) => entry.kind === "notice");
+		expect(notices).toHaveLength(1);
+		expect(notices[0]?.bindingKey).toBe(otherKey);
+		expect(notices[0]?.chat).toEqual(otherChat);
+	});
+
 	test("a settlement during the meta/enqueue window leaves no answerable row", async () => {
 		const r = await rig();
 		await r.bindings.bind(KEY, 7, CHAT);

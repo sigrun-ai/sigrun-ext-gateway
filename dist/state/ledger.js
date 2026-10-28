@@ -83,6 +83,31 @@ export class Ledger {
     nextPending(channel) {
         return this.entries.find((entry) => entry.channel === channel && entry.state === "pending");
     }
+    /**
+     * Cancel an entry that has not started delivery. The transition is
+     * atomic with the ledger write: an attempting/delivered entry cannot
+     * be cancelled after the platform may already have received it.
+     * Returns whether this call cancelled the pending entry.
+     */
+    async cancel(id) {
+        let cancelled = false;
+        const state = await this.file.update((draft) => {
+            const index = draft.entries.findIndex((row) => row.id === id);
+            if (index === -1)
+                return;
+            const row = draft.entries[index];
+            if (row.state !== "pending")
+                return;
+            draft.entries[index] = {
+                ...row,
+                state: "cancelled",
+                stateSince: this.now(),
+            };
+            cancelled = true;
+        });
+        this.entries = state.entries;
+        return cancelled;
+    }
     /** Transition one entry's state (attempting/delivered/failed). */
     async mark(id, state, receipt) {
         await this.file.update((draft) => {

@@ -114,7 +114,7 @@ async function notifyInteraction(
 			context,
 		);
 		if (current === undefined || current.status !== "pending") return;
-		await deps.ledger.enqueue({
+		const enqueued = await deps.ledger.enqueue({
 			channel: target.channel,
 			...(target.bindingKey === undefined ? {} : { bindingKey: target.bindingKey }),
 			chat: target.chat,
@@ -123,6 +123,14 @@ async function notifyInteraction(
 			tag: `interaction:${event.conversationId}:${event.callId}:${target.key}`,
 		});
 		await deps.prompts.markEnqueued(event.conversationId, event.callId, target.key, plan);
+		// A settlement between the pending peek and markEnqueued writes the
+		// call-level tombstone, so no row was reserved. Compensate the lost
+		// reservation by cancelling the still-pending prompt: otherwise its
+		// delivery would leave live buttons and duplicate the outcome notice.
+		if (enqueued !== undefined && !deps.prompts.has(event.conversationId, event.callId, target.key)) {
+			await deps.ledger.cancel(enqueued.id);
+			return;
+		}
 	}
 }
 
@@ -163,8 +171,8 @@ function outcomeText(event: ExtensionLifecyclePayload["interactionSettled"]): st
 }
 
 /**
- * Enqueue the settlement edits (or, when no ref is editable, the
- * fallback outcome notices). Called at settlement AND from the receipt
+ * Enqueue settlement edits and per-binding fallback outcome notices
+ * (a binding without an editable ref gets a notice). Called at settlement AND from the receipt
  * path when a real delivery ref arrives for an ALREADY-settled prompt:
  * settlement that beats the receipt leaves no editable ref, so the
  * late receipt is the last chance to replace the live buttons.
@@ -175,17 +183,17 @@ export async function enqueueSettlementEdits(
 	callId: string,
 	outcome: string,
 ): Promise<void> {
-	const editableChannels = new Set<string>();
+	const editableBindings = new Set<string>();
 	const refs = deps.prompts.refsOf(conversationId, callId);
 	for (const ref of refs) {
 		const id = channelForRef(deps, conversationId, callId, ref);
 		const channel = id === undefined ? undefined : deps.channelOf(id);
+		const bindingKey = deps.bindings.keysOf(conversationId).find((key) => {
+			const binding = deps.bindings.get(key);
+			return binding?.chat.chatId === ref.chat.chatId && binding.chat.threadId === ref.chat.threadId;
+		});
 		if (channel?.capabilities.edit !== undefined && channel.edit !== undefined && ref.messageId !== "") {
-			editableChannels.add(channel.id);
-			const bindingKey = deps.bindings.keysOf(conversationId).find((key) => {
-				const binding = deps.bindings.get(key);
-				return binding?.chat.chatId === ref.chat.chatId && binding.chat.threadId === ref.chat.threadId;
-			});
+			if (bindingKey !== undefined) editableBindings.add(bindingKey);
 			await deps.ledger.enqueue({
 				channel: channel.id,
 				...(bindingKey === undefined ? {} : { bindingKey }),
@@ -197,20 +205,22 @@ export async function enqueueSettlementEdits(
 			});
 		}
 	}
-	if (editableChannels.size === 0) {
-		for (const key of deps.bindings.keysOf(conversationId)) {
-			const binding = deps.bindings.get(key);
-			const channelId = key.split(":")[0]!;
-			if (binding === undefined || binding.dead === true) continue;
-			await deps.ledger.enqueue({
-				channel: channelId,
-				bindingKey: key,
-				chat: binding.chat,
-				kind: "notice",
-				message: { chat: binding.chat, text: `Interaction ${outcome}.` },
-				tag: `interaction-settled-notice:${conversationId}:${callId}:${key}`,
-			});
-		}
+	// Fallback eligibility is PER BINDING: an editable ref on one channel
+	// must not suppress the outcome notice owed to another binding whose
+	// channel cannot edit (or whose prompt has no editable ref).
+	for (const key of deps.bindings.keysOf(conversationId)) {
+		if (editableBindings.has(key)) continue;
+		const binding = deps.bindings.get(key);
+		const channelId = key.split(":")[0]!;
+		if (binding === undefined || binding.dead === true) continue;
+		await deps.ledger.enqueue({
+			channel: channelId,
+			bindingKey: key,
+			chat: binding.chat,
+			kind: "notice",
+			message: { chat: binding.chat, text: `Interaction ${outcome}.` },
+			tag: `interaction-settled-notice:${conversationId}:${callId}:${key}`,
+		});
 	}
 }
 
