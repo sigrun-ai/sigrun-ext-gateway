@@ -545,4 +545,83 @@ describe("prompt delivery and answering", () => {
 		expect(r.channel.edits[0]?.message.text).toContain("bob");
 		expect(r.prompts.pendingInChat(KEY)).toEqual([]);
 	});
+
+	// F1: settlement that beats the delivery receipt leaves live buttons
+	// plus a duplicate notice. The late real receipt must self-heal the
+	// prompt with exactly ONE edit and no further notice.
+	test("a real receipt arriving after settlement enqueues exactly one edit and no duplicate notice", async () => {
+		const r = await rig();
+		await r.bindings.bind(KEY, 7, CHAT);
+		// The prompt is enqueued but not yet delivered: no real ref.
+		await r.prompts.markEnqueued(7, "call-race", KEY, { kind: "webui" });
+		await onInteractionSettled({ conversationId: 7 as never, callId: "call-race", kind: "gate.ask", status: "answered", answer: { decision: "allow" } }, r.deps, CONTEXT);
+		// Settlement with an empty ref falls back to a notice.
+		expect(r.ledger.list().filter((entry) => entry.kind === "edit")).toHaveLength(0);
+		expect(r.ledger.list().filter((entry) => entry.kind === "notice")).toHaveLength(1);
+		const { receiptForInteraction } = await import("../src/interactions/receipts.js");
+		await receiptForInteraction(r.prompts, {
+			id: "entry-race",
+			channel: "loop",
+			bindingKey: KEY,
+			chat: CHAT,
+			kind: "interaction",
+			message: { chat: CHAT, text: "prompt" },
+			state: "delivered",
+			attempts: 1,
+			createdAt: 0,
+			stateSince: 0,
+			tag: `interaction:7:call-race:${KEY}`,
+		}, { messageIds: ["loop-99"] }, r.deps);
+		expect(r.prompts.refsOf(7, "call-race")).toEqual([{ chat: CHAT, messageId: "loop-99" }]);
+		const edits = r.ledger.list().filter((entry) => entry.kind === "edit");
+		expect(edits).toHaveLength(1);
+		expect(edits[0]?.message.text).toContain("allow");
+		expect(r.ledger.list().filter((entry) => entry.kind === "notice")).toHaveLength(1);
+	});
+
+	// F2: the ledger enqueue precedes the prompt row, so a throwing
+	// enqueue never permanently suppresses a prompt target on replay.
+	test("a throwing ledger enqueue does not record the prompt row", async () => {
+		const r = await rig();
+		await r.bindings.bind(KEY, 7, CHAT);
+		await seedPending(r.host);
+		const original = r.ledger.enqueue.bind(r.ledger);
+		r.ledger.enqueue = async () => { throw new Error("disk full"); };
+		await createInteractionNotifier(r.deps).notify({
+			type: "interaction.pending", conversationId: 7, callId: "call-1", user: "alice",
+			title: "Sigrun needs you", body: "Approval",
+		}, { host: r.host });
+		expect(r.prompts.has(7, "call-1", KEY)).toBe(false);
+		r.ledger.enqueue = original;
+		await createInteractionNotifier(r.deps).notify({
+			type: "interaction.pending", conversationId: 7, callId: "call-1", user: "alice",
+			title: "Sigrun needs you", body: "Approval",
+		}, { host: r.host });
+		expect(r.prompts.has(7, "call-1", KEY)).toBe(true);
+	});
+
+	// F3: a settle landing between the pending peek and the enqueue loop
+	// must not deliver a live prompt for an already-settled interaction.
+	test("a settlement during prompt fan-out aborts the enqueue", async () => {
+		const r = await rig();
+		await r.bindings.bind(KEY, 7, CHAT);
+		await seedPending(r.host);
+		let peeks = 0;
+		const peek = r.host.peekInteraction.bind(r.host);
+		r.host.peekInteraction = async (...args: Parameters<typeof peek>) => {
+			peeks += 1;
+			// The settle lands in the window between the pending peek and
+			// the pre-enqueue re-check (F3).
+			if (peeks === 2) {
+				await r.host.answerInteraction(7 as never, "call-1", { values: { decision: "allow" } }, CONTEXT, { user: "alice" });
+			}
+			return peek(...args);
+		};
+		await createInteractionNotifier(r.deps).notify({
+			type: "interaction.pending", conversationId: 7, callId: "call-1", user: "alice",
+			title: "Sigrun needs you", body: "Approval",
+		}, { host: r.host });
+		expect(r.ledger.list().filter((entry) => entry.kind === "interaction")).toHaveLength(0);
+		expect(r.prompts.has(7, "call-1", KEY)).toBe(false);
+	});
 });

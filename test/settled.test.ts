@@ -401,6 +401,36 @@ describe("onRunSettled: access re-check (M7)", () => {
 	});
 });
 
+describe("onRunSettled: job meta version drift (F8)", () => {
+	// A core SessionMeta doc version bump makes api.document THROW
+	// (pi-durable checks both directions). The engine's readMeta wraps
+	// that read so job delivery degrades to absent-meta, logged once,
+	// instead of losing the whole fan-out to the settled catch.
+	test("a throwing readMeta is indistinguishable from absent job meta", async () => {
+		const harness = await rig();
+		const warnings: string[] = [];
+		const errors: string[] = [];
+		const deps: SettledDeps = {
+			...harness.deps,
+			readMeta: async () => {
+				const { readJobMeta } = await import("../src/session-meta.js");
+				return readJobMeta(async () => {
+					throw new Error("document sigrun.session-meta has newer version 2 (token has 1)");
+				}, (message) => { warnings.push(message); });
+			},
+			log: {
+				...silentLog(),
+				error: (message) => { errors.push(message); },
+			},
+		};
+		await onRunSettled(answeredEvent(7, "the answer"), deps);
+		// The absent-meta read skips job delivery without throwing; the
+		// version-drift cause is visible in the log exactly once.
+		expect(errors).toHaveLength(0);
+		expect(warnings.some((message) => message.includes("newer version"))).toBe(true);
+	});
+});
+
 describe("onRunSettled: unanswered runs", () => {
 	test("an unanswered run notifies the ORIGIN chat only", async () => {
 		const harness = await rig();

@@ -15,6 +15,8 @@ export declare class PromptStore {
     private readonly file;
     private rows;
     private settled;
+    /** identity → outcome text, recorded at settlement (Phase B timestamps). */
+    private readonly outcomes;
     constructor(path: string);
     /** Record a delivered prompt ref (idempotent for one recipient key). */
     record(conversationId: number, callId: string, key: string, ref: MessageRef, plan: ChatAnswerPlan): Promise<void>;
@@ -38,5 +40,10 @@ export declare class PromptStore {
     /** Install the real refs after the interaction ledger entry is delivered. */
     recordReceipt(conversationId: number, callId: string, key: string, chat: MessageRef["chat"], messageIds: readonly string[]): Promise<void>;
     /** Retire pending answers while preserving refs for the settlement edit. */
-    settle(conversationId: number, callId: string): Promise<void>;
+    settle(conversationId: number, callId: string, outcome?: string): Promise<void>;
+    /**
+     * The outcome text recorded at settlement, when this identity is
+     * settled. The receipt path reads it to self-heal the prompt edit.
+     */
+    settledOutcome(conversationId: number, callId: string, key: string): string | undefined;
 }

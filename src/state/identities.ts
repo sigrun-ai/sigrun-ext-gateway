@@ -21,8 +21,12 @@ export function chatProviderOf(channel: string): string {
 	return `chat:${channel}`;
 }
 
-/** Core admits only this channel-id shape inside a chat provider. */
-export const CHANNEL_ID_PATTERN = /^[a-z0-9][a-z0-9._:-]*$/;
+/**
+ * Core admits only this channel-id shape inside a chat provider. This
+ * matches the loader's grammar exactly: every binding-key and target
+ * parse splits on ":", so a wider alphabet would mis-attribute chats.
+ */
+export const CHANNEL_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 /** One stored home chat row (per user, per channel). */
 interface HomeRow {

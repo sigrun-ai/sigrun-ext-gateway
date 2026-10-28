@@ -123,6 +123,19 @@ describe("home-chat notifier", () => {
 		expect(ledger.nextPending("loop")?.message.text).toBe("Reply ready — Second reply");
 	});
 
+	// F6: a DEAD binding must not suppress the unbound home notice —
+	// the settled fan-out skips dead bindings, so counting them here
+	// would drop the answer with no log.
+	test("a conversation whose only binding is dead still gets the home notice", async () => {
+		const { bindings, ledger, deps } = await rig();
+		const chat = { chatId: "200000002", chatType: "dm" } as const;
+		const key = bindingKey("loop", chat);
+		await bindings.bind(key, 7, chat);
+		await bindings.markDead(key);
+		await createNotifier(deps).notify(settled(), { host: deps.host });
+		expect(ledger.nextPending("loop")?.message.text).toContain("Reply ready");
+	});
+
 	test("a bound run.settled enqueues nothing", async () => {
 		const { bindings, ledger, deps } = await rig();
 		const chat = { chatId: "200000002", chatType: "dm" } as const;

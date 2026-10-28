@@ -12,8 +12,12 @@ import { JsonFile } from "./json-file.js";
 export function chatProviderOf(channel) {
     return `chat:${channel}`;
 }
-/** Core admits only this channel-id shape inside a chat provider. */
-export const CHANNEL_ID_PATTERN = /^[a-z0-9][a-z0-9._:-]*$/;
+/**
+ * Core admits only this channel-id shape inside a chat provider. This
+ * matches the loader's grammar exactly: every binding-key and target
+ * parse splits on ":", so a wider alphabet would mis-attribute chats.
+ */
+export const CHANNEL_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 /** Core-backed sender resolution and engine-owned home-chat persistence. */
 export class IdentityStore {
     host;

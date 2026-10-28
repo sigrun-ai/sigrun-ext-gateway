@@ -53,8 +53,12 @@ async function notify(
 	if (event.type === "run.settled") {
 		if (event.conversationId === undefined) return;
 		// The settled fan-out owns bound conversations; a second notice
-		// here would duplicate the answer the chat just received.
-		if (deps.bindings.keysOf(event.conversationId).length > 0) return;
+		// here would duplicate the answer the chat just received. Only
+		// LIVE bindings suppress: a dead binding is skipped by the
+		// fan-out, so counting it would drop the answer with no log.
+		const live = deps.bindings.keysOf(event.conversationId)
+			.filter((key) => deps.bindings.get(key)?.dead !== true);
+		if (live.length > 0) return;
 		const meta = await deps.host.conversations.meta(event.conversationId as ConversationId);
 		// New-conversation jobs are unbound, but their delivery and
 		// job.failed paths own notices. The settled outcome (Task 4) is

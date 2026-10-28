@@ -32,6 +32,8 @@ export class PromptStore {
 	private readonly file: JsonFile<PromptFile>;
 	private rows: PromptRow[];
 	private settled: Set<string>;
+	/** identity → outcome text, recorded at settlement (Phase B timestamps). */
+	private readonly outcomes = new Map<string, string>();
 
 	constructor(path: string) {
 		this.file = new JsonFile<PromptFile>(path, () => ({ prompts: [], settled: [] }));
@@ -137,15 +139,24 @@ export class PromptStore {
 	}
 
 	/** Retire pending answers while preserving refs for the settlement edit. */
-	async settle(conversationId: number, callId: string): Promise<void> {
+	async settle(conversationId: number, callId: string, outcome = "answered"): Promise<void> {
+		const keys = this.rows
+			.filter((row) => row.conversationId === conversationId && row.callId === callId)
+			.map(identityOf);
 		const state = await this.file.update((draft) => {
-			const keys = draft.prompts
-				.filter((row) => row.conversationId === conversationId && row.callId === callId)
-				.map(identityOf);
 			draft.settled = [...new Set([...draft.settled, ...keys])];
 		});
+		for (const identity of keys) this.outcomes.set(identity, outcome);
 		this.rows = state.prompts;
 		this.settled = new Set(state.settled);
+	}
+
+	/**
+	 * The outcome text recorded at settlement, when this identity is
+	 * settled. The receipt path reads it to self-heal the prompt edit.
+	 */
+	settledOutcome(conversationId: number, callId: string, key: string): string | undefined {
+		return this.outcomes.get(`${conversationId}:${callId}:${key}`);
 	}
 }
 

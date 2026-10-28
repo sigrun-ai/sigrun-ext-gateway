@@ -51,14 +51,20 @@ async function notifyInteraction(event, deps) {
     const record = await deps.host.peekInteraction(event.conversationId, event.callId, context);
     if (record === undefined || record.status !== "pending")
         return;
+    // A settle can land while the render above awaited: re-check BEFORE
+    // the first enqueue so an already-settled interaction never gets a
+    // live prompt (the buttons would only answer "Already answered.").
+    const still = await deps.host.peekInteraction(event.conversationId, event.callId, context);
+    if (still === undefined || still.status !== "pending")
+        return;
     for (const target of pendingTargets) {
         const channel = deps.channelOf(target.channel);
         if (channel === undefined) {
             deps.log.warn(`interaction prompt skipped: no channel "${target.channel}"`);
             continue;
         }
-        const plan = planInteraction(record, channel.capabilities);
-        const rendered = renderInteraction(record, channel.capabilities, {
+        const plan = planInteraction(still, channel.capabilities);
+        const rendered = renderInteraction(still, channel.capabilities, {
             conversationId: event.conversationId,
             conversationName: (await deps.host.conversations.meta(event.conversationId)).name ?? `Conversation ${event.conversationId}`,
             ...(event.url === undefined ? {} : { link: event.url }),
@@ -66,7 +72,9 @@ async function notifyInteraction(event, deps) {
                 ? { ...action, conversationId: event.conversationId }
                 : action),
         });
-        await deps.prompts.markEnqueued(event.conversationId, event.callId, target.key, plan);
+        // The ledger enqueue precedes the prompt row: the ledger tag is
+        // the durable dedupe, so a throwing enqueue must NOT leave a row
+        // that would suppress this target on every replay.
         await deps.ledger.enqueue({
             channel: target.channel,
             ...(target.bindingKey === undefined ? {} : { bindingKey: target.bindingKey }),
@@ -75,6 +83,7 @@ async function notifyInteraction(event, deps) {
             message: { chat: target.chat, ...rendered },
             tag: `interaction:${event.conversationId}:${event.callId}:${target.key}`,
         });
+        await deps.prompts.markEnqueued(event.conversationId, event.callId, target.key, plan);
     }
 }
 /** Enqueue outcome edits/notices and retire numbered/reply-to matching. */
@@ -86,56 +95,70 @@ export async function onInteractionSettled(event, deps, context) {
         // the extension's only chance to receive the secret. The widened C6
         // event carries everything chat rendering needs (the stored answer
         // is masked by construction — secrets never persist).
-        const who = event.answeredByUser === undefined ? "" : ` by ${event.answeredByUser}`;
-        // SAFETY: the stored answer's values are validated JsonValue (the
-        // record's answer shape); the payload types them loosely because
-        // the contract cannot import the json module's runtime shape.
-        const answerValues = (event.answer ?? {});
-        const outcome = event.status === "answered"
-            ? `answered${who}: ${summarizeValues(answerValues)}`
-            : `${event.status}${who}`;
-        const editableChannels = new Set();
-        const refs = deps.prompts.refsOf(event.conversationId, event.callId);
-        for (const ref of refs) {
-            const id = channelForRef(deps, event.conversationId, event.callId, ref);
-            const channel = id === undefined ? undefined : deps.channelOf(id);
-            if (channel?.capabilities.edit !== undefined && channel.edit !== undefined && ref.messageId !== "") {
-                editableChannels.add(channel.id);
-                const bindingKey = deps.bindings.keysOf(event.conversationId).find((key) => {
-                    const binding = deps.bindings.get(key);
-                    return binding?.chat.chatId === ref.chat.chatId && binding.chat.threadId === ref.chat.threadId;
-                });
-                await deps.ledger.enqueue({
-                    channel: channel.id,
-                    ...(bindingKey === undefined ? {} : { bindingKey }),
-                    chat: ref.chat,
-                    kind: "edit",
-                    ref,
-                    message: { chat: ref.chat, text: truncateInteractionText(`Interaction ${outcome}.`, channel.capabilities.maxMessageLength) },
-                    tag: `interaction-settled:${event.conversationId}:${event.callId}:${channel.id}:${ref.messageId}`,
-                });
-            }
-        }
-        if (editableChannels.size === 0) {
-            for (const key of deps.bindings.keysOf(event.conversationId)) {
-                const binding = deps.bindings.get(key);
-                const channelId = key.split(":")[0];
-                if (binding === undefined || binding.dead === true)
-                    continue;
-                await deps.ledger.enqueue({
-                    channel: channelId,
-                    bindingKey: key,
-                    chat: binding.chat,
-                    kind: "notice",
-                    message: { chat: binding.chat, text: `Interaction ${outcome}.` },
-                    tag: `interaction-settled-notice:${event.conversationId}:${event.callId}:${key}`,
-                });
-            }
-        }
-        await deps.prompts.settle(event.conversationId, event.callId);
+        const outcome = outcomeText(event);
+        await enqueueSettlementEdits(deps, event.conversationId, event.callId, outcome);
+        await deps.prompts.settle(event.conversationId, event.callId, outcome);
     }
     catch (error) {
         deps.log.error(`interaction settlement delivery failed (${String(event.conversationId)}:${event.callId})`, error);
+    }
+}
+/** The outcome summary the settlement edit/notice carries. */
+function outcomeText(event) {
+    const who = event.answeredByUser === undefined ? "" : ` by ${event.answeredByUser}`;
+    // SAFETY: the stored answer's values are validated JsonValue (the
+    // record's answer shape); the payload types them loosely because
+    // the contract cannot import the json module's runtime shape.
+    const answerValues = (event.answer ?? {});
+    return event.status === "answered"
+        ? `answered${who}: ${summarizeValues(answerValues)}`
+        : `${event.status}${who}`;
+}
+/**
+ * Enqueue the settlement edits (or, when no ref is editable, the
+ * fallback outcome notices). Called at settlement AND from the receipt
+ * path when a real delivery ref arrives for an ALREADY-settled prompt:
+ * settlement that beats the receipt leaves no editable ref, so the
+ * late receipt is the last chance to replace the live buttons.
+ */
+export async function enqueueSettlementEdits(deps, conversationId, callId, outcome) {
+    const editableChannels = new Set();
+    const refs = deps.prompts.refsOf(conversationId, callId);
+    for (const ref of refs) {
+        const id = channelForRef(deps, conversationId, callId, ref);
+        const channel = id === undefined ? undefined : deps.channelOf(id);
+        if (channel?.capabilities.edit !== undefined && channel.edit !== undefined && ref.messageId !== "") {
+            editableChannels.add(channel.id);
+            const bindingKey = deps.bindings.keysOf(conversationId).find((key) => {
+                const binding = deps.bindings.get(key);
+                return binding?.chat.chatId === ref.chat.chatId && binding.chat.threadId === ref.chat.threadId;
+            });
+            await deps.ledger.enqueue({
+                channel: channel.id,
+                ...(bindingKey === undefined ? {} : { bindingKey }),
+                chat: ref.chat,
+                kind: "edit",
+                ref,
+                message: { chat: ref.chat, text: truncateInteractionText(`Interaction ${outcome}.`, channel.capabilities.maxMessageLength) },
+                tag: `interaction-settled:${conversationId}:${callId}:${channel.id}:${ref.messageId}`,
+            });
+        }
+    }
+    if (editableChannels.size === 0) {
+        for (const key of deps.bindings.keysOf(conversationId)) {
+            const binding = deps.bindings.get(key);
+            const channelId = key.split(":")[0];
+            if (binding === undefined || binding.dead === true)
+                continue;
+            await deps.ledger.enqueue({
+                channel: channelId,
+                bindingKey: key,
+                chat: binding.chat,
+                kind: "notice",
+                message: { chat: binding.chat, text: `Interaction ${outcome}.` },
+                tag: `interaction-settled-notice:${conversationId}:${callId}:${key}`,
+            });
+        }
     }
 }
 /** Recover the channel from the binding key/home prompt target. */

@@ -14,7 +14,11 @@ import type { EngineLog } from "../log.js";
 export type LinkVia = "pairing" | "self";
 /** Core's one provider-key convention for platform senders. */
 export declare function chatProviderOf(channel: string): string;
-/** Core admits only this channel-id shape inside a chat provider. */
+/**
+ * Core admits only this channel-id shape inside a chat provider. This
+ * matches the loader's grammar exactly: every binding-key and target
+ * parse splits on ":", so a wider alphabet would mis-attribute chats.
+ */
 export declare const CHANNEL_ID_PATTERN: RegExp;
 /** The result of a `userFor` resolution. */
 export interface ResolvedUser {

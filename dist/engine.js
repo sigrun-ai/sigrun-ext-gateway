@@ -39,7 +39,7 @@ import { Ledger } from "./state/ledger.js";
 import { DeliveryWorker } from "./outbound/delivery.js";
 import { onRunSettled } from "./outbound/settled.js";
 import { createNotifier } from "./notify.js";
-import { SessionMetaDoc } from "./session-meta.js";
+import { SessionMetaDoc, readJobMeta } from "./session-meta.js";
 import { StreamRegistry } from "./outbound/stream.js";
 import { hashId } from "./log.js";
 import { collectAttachments } from "./inbound/media.js";
@@ -272,7 +272,7 @@ export function createEngine(host, deps = {}) {
         // The event bus's narrowed snapshot API works in harness-only
         // embedders; host.conversations.meta would wait for a server
         // bridge that those embedders never create.
-        readMeta: async (conversationId) => await api.document(SessionMetaDoc, conversationId, context),
+        readMeta: async (conversationId) => await readJobMeta(async () => await api.document(SessionMetaDoc, conversationId, context), (message) => { log.once("session-meta-read", "warn", message); }),
     });
     const notifyDeps = () => ({
         host,
@@ -511,7 +511,7 @@ export function createEngine(host, deps = {}) {
                     },
                     resolveFiles: (entry) => ledger.resolveFiles(host, entry),
                     onInteractionReceipt: async (entry, receipt) => {
-                        await receiptForInteraction(prompts, entry, receipt);
+                        await receiptForInteraction(prompts, entry, receipt, interactionDeps());
                     },
                 });
                 workers.set(id, worker);

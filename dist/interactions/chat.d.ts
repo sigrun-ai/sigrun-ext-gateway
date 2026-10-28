@@ -18,3 +18,11 @@ export interface InteractionChatDeps extends AnswerDeps {
 export declare function createInteractionNotifier(deps: InteractionChatDeps): NotifierContribution;
 /** Enqueue outcome edits/notices and retire numbered/reply-to matching. */
 export declare function onInteractionSettled(event: ExtensionLifecyclePayload["interactionSettled"], deps: InteractionChatDeps, context: HandlerContext): Promise<void>;
+/**
+ * Enqueue the settlement edits (or, when no ref is editable, the
+ * fallback outcome notices). Called at settlement AND from the receipt
+ * path when a real delivery ref arrives for an ALREADY-settled prompt:
+ * settlement that beats the receipt leaves no editable ref, so the
+ * late receipt is the last chance to replace the live buttons.
+ */
+export declare function enqueueSettlementEdits(deps: InteractionChatDeps, conversationId: number, callId: string, outcome: string): Promise<void>;

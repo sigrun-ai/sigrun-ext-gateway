@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import type { ChatRef } from "@sigrun/sigrun/extension";
 import { createFakeHost, type FakeHost } from "./fake-host.js";
 import { parseGatewayConfig, type ChannelConfig } from "../src/config.js";
-import { IdentityStore } from "../src/state/identities.js";
+import { CHANNEL_ID_PATTERN, IdentityStore } from "../src/state/identities.js";
 import type { EngineLog } from "../src/log.js";
 
 const CHAT: ChatRef = { chatId: "100000001", chatType: "dm" };
@@ -40,6 +40,20 @@ async function rig(): Promise<{ host: FakeHost; store: IdentityStore; dir: strin
 		dir,
 	};
 }
+
+describe("CHANNEL_ID_PATTERN", () => {
+	// F5: the engine's alphabet must match the loader's grammar — every
+	// binding-key/target parse splits on ":", so ":" and "." are not ids.
+	test("matches the loader grammar (no colons or dots, leading lowercase letter)", () => {
+		expect(CHANNEL_ID_PATTERN.source).toBe("^[a-z][a-z0-9-]*$");
+		expect(CHANNEL_ID_PATTERN.test("loop")).toBe(true);
+		expect(CHANNEL_ID_PATTERN.test("loop-2")).toBe(true);
+		expect(CHANNEL_ID_PATTERN.test("loop:sub")).toBe(false);
+		expect(CHANNEL_ID_PATTERN.test("loop.sub")).toBe(false);
+		expect(CHANNEL_ID_PATTERN.test("2loop")).toBe(false);
+		expect(CHANNEL_ID_PATTERN.test("Loop")).toBe(false);
+	});
+});
 
 describe("IdentityStore over host.accounts", () => {
 	test("an allowlist hit resolves via allow without calling host.accounts", async () => {

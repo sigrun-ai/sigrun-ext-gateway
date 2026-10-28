@@ -2,11 +2,13 @@
 
 import type { LedgerEntry } from "../state/ledger.js";
 import type { PromptStore } from "./prompts.js";
+import { enqueueSettlementEdits, type InteractionChatDeps } from "./chat.js";
 
 export async function receiptForInteraction(
 	prompts: PromptStore,
 	entry: LedgerEntry,
 	receipt: { readonly messageIds: readonly string[] },
+	deps?: InteractionChatDeps,
 ): Promise<void> {
 	// The receipt is authoritative: an early settlement may have removed
 	// the pending row, but the delivered message still needs an edit ref.
@@ -16,7 +18,9 @@ export async function receiptForInteraction(
 		const suffix = `:${entry.bindingKey}`;
 		if (!match[2]!.endsWith(suffix)) return;
 		const callId = match[2]!.slice(0, -suffix.length);
-		await prompts.recordReceipt(Number(match[1]), callId, entry.bindingKey, entry.chat, receipt.messageIds);
+		const conversationId = Number(match[1]);
+		await prompts.recordReceipt(conversationId, callId, entry.bindingKey, entry.chat, receipt.messageIds);
+		await healSettledPrompt(prompts, deps, conversationId, callId, entry.bindingKey, receipt.messageIds);
 		return;
 	}
 	const tag = entry.tag;
@@ -33,6 +37,33 @@ export async function receiptForInteraction(
 		const suffix = `${row.callId}:${row.key}`;
 		if (afterConversation !== suffix) continue;
 		await prompts.recordReceipt(conversationId, row.callId, row.key, entry.chat, receipt.messageIds);
+		await healSettledPrompt(prompts, deps, conversationId, row.callId, row.key, receipt.messageIds);
 		return;
+	}
+}
+
+/**
+ * A real receipt for an ALREADY-settled prompt self-heals the live
+ * buttons: settlement ran with an empty ref (no edit possible, so a
+ * notice went out), and this delivered message is the one that now
+ * needs the outcome edit. The edit tag is the same the settlement
+ * path would have used, so a repeat receipt stays a no-op.
+ */
+async function healSettledPrompt(
+	prompts: PromptStore,
+	deps: InteractionChatDeps | undefined,
+	conversationId: number,
+	callId: string,
+	key: string,
+	messageIds: readonly string[],
+): Promise<void> {
+	if (deps === undefined) return;
+	if (messageIds.length === 0 || messageIds[0] === "") return;
+	const outcome = prompts.settledOutcome(conversationId, callId, key);
+	if (outcome === undefined) return;
+	try {
+		await enqueueSettlementEdits(deps, conversationId, callId, outcome);
+	} catch (error) {
+		deps.log.error(`settled prompt receipt heal failed (${conversationId}:${callId})`, error);
 	}
 }
