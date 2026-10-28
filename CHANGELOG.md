@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-28
+
 ### Fixed
 - The interaction notifier and chat answer correlation now inspect
   records through core's non-consuming `peekInteraction` instead of the
