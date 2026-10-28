@@ -190,6 +190,24 @@ Home-DM settled notices are truthful about the outcome: an answered run
 reads `Reply ready`; a failed or aborted run reads `Run ended without a
 reply` with the settle reason, never reply-ready language.
 
+### Prompt retention
+
+Platform prompt messages are never deleted by the gateway. What the
+gateway retains locally is the correlation/edit metadata in
+`prompts.json`: message refs and answer plans expire seven days after
+the interaction settles, so a settlement edit (or a late delivery
+receipt's self-heal edit) is only possible inside that window. Compact
+settled tombstones — recipient identity, settlement time, and outcome
+text — persist permanently for replay suppression: a delayed receipt
+or replay after the row expired recreates nothing and can never make
+an answered prompt answerable again. Pending, unsettled prompts are
+never age-pruned. Refs/plans are therefore bounded by active prompts
+plus seven days of settled history; the small tombstone set grows with
+interaction history by design (the file as a whole is NOT bounded).
+Legacy unversioned state migrates on startup without losing refs or
+re-opening old prompts; a wholly malformed `prompts.json` fails loudly
+rather than silently resetting interaction state.
+
 ## Delivery, state, and shutdown
 
 Responses stream through adapter edit support where available. Final
