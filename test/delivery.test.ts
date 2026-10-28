@@ -614,6 +614,10 @@ describe("cancellation is a barrier, not a request (final-review P1)", () => {
 		});
 		expect(entry).toBeDefined();
 		const id = entry!.id;
+		// A SUCCESSOR is queued so "the queue still progresses" is a real
+		// assertion: if the refused-claim branch parked the loop instead of
+		// continuing, this entry would never be delivered.
+		const successor = await enqueueFinal(harness, "successor must send");
 
 		harness.worker.kick();
 		await reached;                       // worker is now pre-claim
@@ -621,9 +625,13 @@ describe("cancellation is a barrier, not a request (final-review P1)", () => {
 		release?.();
 		await harness.clock.advance(0);
 
-		// No send, and the queue still progresses (a refused claim is not a park).
-		expect(harness.channel.sent).toHaveLength(0);
+		// The cancelled entry never sends, and the loop moved on to the
+		// successor rather than parking on the refusal.
+		expect(harness.channel.sent.map((sent) => sent.text)).toEqual([
+			"successor must send",
+		]);
 		expect(harness.ledger.nextPending("loop")).toBeUndefined();
+		expect(successor).not.toBe(id);
 	});
 
 	test("a cancelled entry can never be resurrected by a later mark", async () => {
