@@ -71,7 +71,7 @@ const HOST_MODULE_PINS = {
 	"@earendil-works/chord": "1.3.0",
 	"@earendil-works/pi-codemode": "1.3.0",
 	typebox: "1.3.27",
-	"@sigrun/shared": "0.2.0",
+	"@sigrun/shared": "0.2.1",
 };
 const peers = manifest.peerDependencies ?? {};
 const devDeps = manifest.devDependencies ?? {};
