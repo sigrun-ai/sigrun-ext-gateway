@@ -47,9 +47,10 @@ export async function answerFromChat(
 	);
 	if (access !== "write") return "You do not have write access to this conversation.";
 	// Terminal-snapshot invariant: secret-bearing records are webui-plan,
-	// so no chat answer reaches this consuming read. Widening the planner
-	// requires a non-consuming snapshot before any terminal path reads one.
-	const record = await deps.host.snapshotInteraction(
+	// so no chat answer reaches a secret record. The gateway owns NO
+	// secret delivery regardless — this correlation/terminal read only
+	// INSPECTS, so it is a peek (non-consuming, masked) by construction.
+	const record = await deps.host.peekInteraction(
 		answer.conversationId as ConversationId,
 		answer.callId,
 		deps.context ?? { abortSignal: new AbortController().signal },

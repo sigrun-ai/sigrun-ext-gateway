@@ -86,6 +86,18 @@ export interface FakeHost extends SigrunHost {
 	watchCount(id: ConversationId): number;
 	/** The stored interaction records, keyed `${conversationId}:${callId}`. */
 	readonly interactions: ReadonlyMap<string, InteractionRecord>;
+	/**
+	 * Answer a secret record the way the WEBUI route does (core fidelity):
+	 * the stored answer keeps only the mask; the true values go into a
+	 * one-shot delivery table that ONLY `snapshotInteraction` consumes.
+	 * Returns the stored masked record.
+	 */
+	answerWithSecret(
+		conversationId: ConversationId,
+		callId: string,
+		values: Record<string, string>,
+		opts?: { readonly user?: string },
+	): InteractionRecord;
 	/** The stored conversation metas, keyed id. */
 	readonly metas: ReadonlyMap<ConversationId, SessionMeta>;
 	/** Core's account-link table, exposed for seeding and assertions. */
@@ -149,6 +161,12 @@ export async function createFakeHost(
 	>();
 	const watchList: Watcher[] = [];
 	const interactions = new Map<string, InteractionRecord>();
+	// Core's one-shot secret-delivery fidelity (Task 4): answering through
+	// `answerWithSecret` stores ONLY the mask on the record and parks the
+	// true values here; `snapshotInteraction` takes them ONCE (the owning
+	// extension's read), `peekInteraction` never touches the table.
+	const secretDeliveries = new Map<string, Record<string, string>>();
+	const SECRET_MASK = "[secret]";
 	// External account links, keyed `provider:subject` (M3a's surface).
 	const accountLinks = new Map<string, AccountLinkWire>();
 	const filesByConversation = new Map<
@@ -317,6 +335,24 @@ export async function createFakeHost(
 			callId: string,
 		) => {
 			record("snapshotInteraction", conversationId, callId);
+			const key = `${conversationId}:${callId}`;
+			const stored = interactions.get(key);
+			if (stored === undefined) return undefined;
+			// The OWNING extension's delivery read: an answered record with
+			// an unread delivery merges the TRUE values back exactly once.
+			if (stored.answer === undefined) return stored;
+			const delivery = secretDeliveries.get(key);
+			if (delivery === undefined) return stored;
+			secretDeliveries.delete(key);
+			return { ...stored, answer: { values: delivery } };
+		},
+		peekInteraction: async (
+			conversationId: ConversationId,
+			callId: string,
+		) => {
+			record("peekInteraction", conversationId, callId);
+			// The inspection read: the stored projection, masked — NEVER
+			// touches the delivery table (repeatable, non-consuming).
 			return interactions.get(`${conversationId}:${callId}`);
 		},
 		setAmbient: async (
@@ -623,6 +659,30 @@ export async function createFakeHost(
 			watchList.filter((watcher) => watcher.id === id).length,
 		interactions,
 		metas,
+		answerWithSecret: (
+			conversationId: ConversationId,
+			callId: string,
+			values: Record<string, string>,
+			opts?: { readonly user?: string },
+		): InteractionRecord => {
+			record("answerWithSecret", conversationId, callId);
+			const key = `${conversationId}:${callId}`;
+			const stored = interactions.get(key);
+			if (stored === undefined) throw new Error(`no interaction ${key}`);
+			const masked = Object.fromEntries(
+				Object.keys(values).map((name) => [name, SECRET_MASK]),
+			);
+			const answered: InteractionRecord = {
+				...stored,
+				status: "answered",
+				answer: { values: masked },
+				answeredBy: "human",
+				...(opts?.user === undefined ? {} : { answeredByUser: opts.user }),
+			};
+			interactions.set(key, answered);
+			secretDeliveries.set(key, { ...values });
+			return answered;
+		},
 		accountLinks: () => [...accountLinks.values()],
 		close: async () => {
 			// Only the dir the host OWNED (a temp dir) is removed; a

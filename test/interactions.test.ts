@@ -349,26 +349,50 @@ describe("prompt delivery and answering", () => {
 		expect(r.prompts.has(7, "call-1", KEY)).toBe(true);
 	});
 
-	// The fake host has no delivery table, so "the delivery survives" is
-	// not provable here: what IS provable engine-side is that the late
-	// notifier still performs its single record read ONLY when a prompt is
-	// actually needed (the already-prompted test below pins the zero-read
-	// case). The no-prior-prompt + already-settled race (a webui answer
-	// beating the notifier) remains a known gap until core provides a
-	// non-consuming read — see the README's interactions section.
-	test("a late settled notification does not re-prompt and reads only once", async () => {
+	// The gateway owns NO secret delivery (secret records are webui-plan),
+	// so every inspection read — the notifier here, answer correlation in
+	// answer.ts — is a PEEK. The owning extension (a fixture in the race
+	// test below) is the only snapshot reader.
+	test("a late settled notification does not re-prompt and peeks only once", async () => {
 		const r = await rig();
 		const secret = form([{ type: "secret", name: "token", label: "Token" }]);
 		await seedPending(r.host, 7, "call-secret", secret);
 		await r.host.answerInteraction(7 as never, "call-secret", { values: { token: "synthetic-secret" } }, CONTEXT, { user: "alice" });
 		// The late notifier performs exactly ONE record read (a prompt is
 		// needed: no prior prompt row), does not re-prompt (the pending
-		// check returns before any enqueue), and never reads again.
+		// check returns before any enqueue), and never reads again. The
+		// read is a PEEK — it can never consume a delivery.
 		await promptOne(r, "alice", 7, "call-secret");
 		expect(r.host.interactions.get("7:call-secret")?.status).toBe("answered");
-		expect(r.host.calls.filter((call) => call.method === "snapshotInteraction")).toHaveLength(1);
-		expect(r.host.calls.filter((call) => call.method === "snapshotInteraction")[0]?.args[1]).toBe("call-secret");
+		expect(r.host.calls.filter((call) => call.method === "peekInteraction")).toHaveLength(1);
+		expect(r.host.calls.filter((call) => call.method === "peekInteraction")[0]?.args[1]).toBe("call-secret");
+		expect(r.host.calls.filter((call) => call.method === "snapshotInteraction")).toHaveLength(0);
 		expect(r.channel.sent.length).toBe(0);
+	});
+
+	test("EARLY-ANSWER RACE: the notifier peeks masked data; the fixture owner still receives the raw secret exactly once", async () => {
+		// Release-readiness-2 §1 acceptance: a user answers in the webui
+		// BEFORE the gateway notifier's first pass. The notifier peeks
+		// (masked); the OWNING extension — a fixture here, never the
+		// gateway — snapshots the raw secret once, then reads masked.
+		const r = await rig();
+		const secret = form([{ type: "secret", name: "token", label: "Token" }]);
+		await seedPending(r.host, 7, "call-race", secret);
+		// The webui answer lands FIRST: stored record masked, true values
+		// parked in the one-shot delivery table.
+		r.host.answerWithSecret(7 as never, "call-race", { token: "synthetic-secret" }, { user: "alice" });
+		// The notifier's first pass: no prompt is rendered (already
+		// answered) and the ONLY read is a non-consuming peek.
+		await promptOne(r, "alice", 7, "call-race");
+		expect(r.channel.sent.length).toBe(0);
+		const peeked = await r.host.peekInteraction(7 as never, "call-race", CONTEXT);
+		expect(peeked?.answer?.values).toEqual({ token: "[secret]" });
+		// The fixture owning extension's FIRST snapshot: the raw secret.
+		const owned = await r.host.snapshotInteraction(7 as never, "call-race", CONTEXT);
+		expect(owned?.answer?.values).toEqual({ token: "synthetic-secret" });
+		// One-shot: the owner's second read is masked.
+		const again = await r.host.snapshotInteraction(7 as never, "call-race", CONTEXT);
+		expect(again?.answer?.values).toEqual({ token: "[secret]" });
 	});
 
 	test("a late settled notification with an already prompted target does not read the record", async () => {
@@ -376,6 +400,7 @@ describe("prompt delivery and answering", () => {
 		await r.prompts.record(7, "call-secret", "user:alice", { chat: CHAT, messageId: "loop-1" }, { kind: "webui" });
 		await r.host.seedInteraction(7 as never, record(form([{ type: "secret", name: "token", label: "Token" }]), { callId: "call-secret" }), CONTEXT);
 		await promptOne(r, "alice", 7, "call-secret");
+		expect(r.host.calls.filter((call) => call.method === "peekInteraction")).toHaveLength(0);
 		expect(r.host.calls.filter((call) => call.method === "snapshotInteraction")).toHaveLength(0);
 	});
 

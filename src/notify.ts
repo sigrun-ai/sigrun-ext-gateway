@@ -57,13 +57,16 @@ async function notify(
 		if (deps.bindings.keysOf(event.conversationId).length > 0) return;
 		const meta = await deps.host.conversations.meta(event.conversationId as ConversationId);
 		// New-conversation jobs are unbound, but their delivery and
-		// job.failed paths own notices. Core's run.settled carries no
-		// outcome, so the false success notice on a failed job run needs
-		// a core-contract event change and is ledgered for final review.
+		// job.failed paths own notices. The settled outcome (Task 4) is
+		// structured on the event: only an ANSWERED run may read as a
+		// ready reply; a failed/aborted run is a truthful non-success
+		// notice carrying the run's own reason.
 		if (meta.jobId !== undefined) return;
 	}
 	const text = event.type === "run.settled"
-		? `Reply ready — ${event.body}${event.url === undefined ? "" : `\n${event.url}`}`
+		? event.outcome.status === "answered"
+			? `Reply ready — ${event.body}${event.url === undefined ? "" : `\n${event.url}`}`
+			: `Run ended without a reply — ${event.body}${event.outcome.reason === "" ? "" : ` (${event.outcome.reason})`}${event.url === undefined ? "" : `\n${event.url}`}`
 		: `${event.title}\n${event.body}${event.url === undefined ? "" : `\n${event.url}`}`;
 	for (const home of deps.identities.homesOf(event.user)) {
 		await deps.ledger.enqueue({

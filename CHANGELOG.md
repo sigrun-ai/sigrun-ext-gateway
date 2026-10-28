@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- The interaction notifier and chat answer correlation now inspect
+  records through core's non-consuming `peekInteraction` instead of the
+  one-shot delivery read. The early-answer race is closed: a secret
+  interaction answered in the webui before the notifier's first pass no
+  longer loses the owning extension's raw-secret delivery (the gateway
+  owns no delivery; regression-tested with a fixture owner).
+- Home-DM settled notices report failed/aborted runs truthfully:
+  `Reply ready` only for answered runs; unanswered runs read `Run ended
+  without a reply` with the settle reason (empty reasons included).
+  Recipient, dedup, bound-conversation suppression, and `notify.home`
+  gating are unchanged.
+
 ## [0.1.1] - 2026-10-27
 ### Fixed
 - First real publish. `0.1.0` was registered with the npm name bootstrap but

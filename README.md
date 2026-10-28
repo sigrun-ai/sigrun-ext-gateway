@@ -179,11 +179,16 @@ buttons; a later tap reports that outcome rather than answering again.
 Unbound conversations notify each write-access user's home DMs, while
 bound conversations prompt each bound chat once.
 
-**Known gap (secret timing):** a secret interaction answered in the
-webui before the gateway's notifier first runs can lose that one-shot
-secret delivery — the notifier's record read is the delivery-consuming
-read. Answering after the prompt rendered is safe. The durable fix is a
-core-provided non-consuming record read.
+Every gateway interaction read is a non-consuming `peekInteraction`:
+the gateway owns no secret delivery (secret records are webui-plan), so
+inspection can never eat the owning extension's one-shot raw-secret
+read. A secret interaction answered in the webui before the notifier's
+first pass is safe — the notifier peeks masked data and the owner still
+receives the secret exactly once.
+
+Home-DM settled notices are truthful about the outcome: an answered run
+reads `Reply ready`; a failed or aborted run reads `Run ended without a
+reply` with the settle reason, never reply-ready language.
 
 ## Delivery, state, and shutdown
 

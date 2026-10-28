@@ -73,13 +73,14 @@ async function rig(): Promise<Rig> {
 	};
 }
 
-function settled(over: Partial<NotificationEvent> = {}): NotificationEvent {
+function settled(over: Partial<Extract<NotificationEvent, { type: "run.settled" }>> = {}): NotificationEvent {
 	return {
 		type: "run.settled",
 		conversationId: 7,
 		user: "alice",
 		title: "Reply ready",
 		body: "Nightly report",
+		outcome: { status: "answered" },
 		...over,
 	};
 }
@@ -153,6 +154,38 @@ describe("home-chat notifier", () => {
 		expect(ledger.nextPending("loop")?.message.text).toBe(
 			"Job nightly failed\nfaux provider failure",
 		);
+	});
+
+	test("an unanswered run with a reason enqueues a truthful non-success notice", async () => {
+		const { ledger, deps } = await rig();
+		await createNotifier(deps).notify(
+			settled({
+				title: "Run ended without a reply",
+				body: "Nightly report — model_error: faux provider failure",
+				outcome: { status: "unanswered", reason: "model_error: faux provider failure" },
+			}),
+			{ host: deps.host },
+		);
+		const text = ledger.nextPending("loop")?.message.text;
+		expect(text).toContain("model_error: faux provider failure");
+		expect(text).not.toContain("Reply ready");
+		expect(text).toContain("Nightly report");
+	});
+
+	test("an unanswered run with an EMPTY reason still never says Reply ready", async () => {
+		const { ledger, deps } = await rig();
+		await createNotifier(deps).notify(
+			settled({
+				title: "Run ended without a reply",
+				body: "Nightly report — ",
+				outcome: { status: "unanswered", reason: "" },
+			}),
+			{ host: deps.host },
+		);
+		const text = ledger.nextPending("loop")?.message.text;
+		expect(text).toBeDefined();
+		expect(text).not.toContain("Reply ready");
+		expect(text).toContain("Run ended without a reply");
 	});
 
 	test("an event without a recipient enqueues nothing", async () => {
