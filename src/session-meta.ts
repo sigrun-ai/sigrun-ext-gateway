@@ -25,6 +25,7 @@ export const SessionMetaDoc = defineDoc<SessionMeta>({
 		draft: { text: "", attachments: [] },
 		source: "user",
 	}),
+	checkpointWhen: () => false,
 });
 
 /**

@@ -62,9 +62,10 @@ check(typeof manifest.bugs?.url === "string", "package.json: bugs.url absent");
 check(typeof manifest.homepage === "string", "package.json: homepage absent");
 
 /** Every host module a sigrun extension/provider imports must be a peer.
- * The exact pins are the family truth: the @earendil-works host modules
- * ship 1.3.0 with sigrun 0.1.0; typebox is pi-ai 1.3.0's own exact
- * dependency (1.3.27) — the host-linked single copy extensions see. */
+ * The @earendil-works host modules ship 1.3.0 with sigrun 0.1.0; peers
+ * also accept 1.4.0 (forward-compat) while devDeps stay pinned at 1.3.0.
+ * typebox is pi-ai 1.3.0's own exact dependency (1.3.27) — the
+ * host-linked single copy extensions see. */
 const HOST_MODULE_PINS = {
 	"@earendil-works/pi-durable": "1.3.0",
 	"@earendil-works/pi-ai": "1.3.0",
@@ -73,6 +74,7 @@ const HOST_MODULE_PINS = {
 	typebox: "1.3.27",
 	"@sigrun/shared": "0.2.1",
 };
+const PEER_FORWARD_COMPAT = " || 1.4.0";
 const peers = manifest.peerDependencies ?? {};
 const devDeps = manifest.devDependencies ?? {};
 for (const [module, spec] of Object.entries(peers)) {
@@ -81,7 +83,10 @@ for (const [module, spec] of Object.entries(peers)) {
 		`package.json: peerDependencies carries non-host module "${module}"`,
 	);
 	const pin = HOST_MODULE_PINS[module];
-	check(spec === pin, `package.json: peerDependencies["${module}"] must be exact "${pin}" (got ${JSON.stringify(spec)})`);
+	check(
+		spec === pin || (module.startsWith("@earendil-works/") && spec === `${pin}${PEER_FORWARD_COMPAT}`),
+		`package.json: peerDependencies["${module}"] must be exact "${pin}" or "${pin}${PEER_FORWARD_COMPAT}" for @earendil-works host modules (got ${JSON.stringify(spec)})`,
+	);
 	check(
 		devDeps[module] === pin || (module === "@sigrun/shared" && devDeps[module] === "file:../sigrun/shared"),
 		`package.json: devDependencies["${module}"] must mirror the peer pin at exact "${pin}" (the shared workspace keeps its file: dev shape; got ${JSON.stringify(devDeps[module])})`,
