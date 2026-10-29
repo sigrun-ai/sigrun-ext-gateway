@@ -22,6 +22,7 @@ export const SessionMetaDoc = defineDoc({
         draft: { text: "", attachments: [] },
         source: "user",
     }),
+    checkpointWhen: () => false,
 });
 /**
  * Read job meta conservatively: a version-drift throw (or any other
