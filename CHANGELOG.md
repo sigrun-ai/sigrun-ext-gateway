@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Forward-compatible with pi-durable 1.4.0 (explicit `checkpointWhen`;
   widened peer range). No behaviour change.
 
+## [0.1.4] - 2026-10-30
+### Changed
+- Widened the `@sigrun/shared` peer to `0.2.1 || 0.3.0` so the gateway
+  co-installs with the sigrun 0.3.0 core family without `ERESOLVE`.
+  No behaviour change.
+
 ## [0.1.2] - 2026-10-28
 
 ### Fixed
