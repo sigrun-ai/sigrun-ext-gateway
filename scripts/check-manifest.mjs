@@ -63,7 +63,9 @@ check(typeof manifest.homepage === "string", "package.json: homepage absent");
 
 /** Every host module a sigrun extension/provider imports must be a peer.
  * The @earendil-works host modules ship 1.3.0 with sigrun 0.1.0; peers
- * also accept 1.4.0 (forward-compat) while devDeps stay pinned at 1.3.0.
+ * also accept 1.4.0 (forward-compat). Phase 2 develops against
+ * the 1.4.0 host family (DEV_PIN_OVERRIDES below), keeping one
+ * type-compatible copy of chord/pi-ai/pi-durable.
  * typebox is pi-ai 1.3.0's own exact dependency (1.3.27) — the
  * host-linked single copy extensions see. */
 const HOST_MODULE_PINS = {
@@ -73,6 +75,14 @@ const HOST_MODULE_PINS = {
 	"@earendil-works/pi-codemode": "1.3.0",
 	typebox: "1.3.27",
 	"@sigrun/shared": "0.2.1",
+};
+/** Phase 2 (core 0.3.0): development happens against pi-durable 1.4.0;
+ * the peer keeps the widened "1.3.0 || 1.4.0" acceptance above. */
+const DEV_PIN_OVERRIDES = {
+	"@earendil-works/chord": "1.4.0",
+	"@earendil-works/pi-ai": "1.4.0",
+	"@earendil-works/pi-codemode": "1.4.0",
+	"@earendil-works/pi-durable": "1.4.0",
 };
 const PEER_FORWARD_COMPAT = " || 1.4.0";
 const peers = manifest.peerDependencies ?? {};
@@ -87,9 +97,10 @@ for (const [module, spec] of Object.entries(peers)) {
 		spec === pin || (module.startsWith("@earendil-works/") && spec === `${pin}${PEER_FORWARD_COMPAT}`),
 		`package.json: peerDependencies["${module}"] must be exact "${pin}" or "${pin}${PEER_FORWARD_COMPAT}" for @earendil-works host modules (got ${JSON.stringify(spec)})`,
 	);
+	const devPin = DEV_PIN_OVERRIDES[module] ?? pin;
 	check(
-		devDeps[module] === pin || (module === "@sigrun/shared" && devDeps[module] === "file:../sigrun/shared"),
-		`package.json: devDependencies["${module}"] must mirror the peer pin at exact "${pin}" (the shared workspace keeps its file: dev shape; got ${JSON.stringify(devDeps[module])})`,
+		devDeps[module] === devPin || (module === "@sigrun/shared" && devDeps[module] === "file:../sigrun/shared"),
+		`package.json: devDependencies["${module}"] must mirror the dev pin at exact "${devPin}" (the shared workspace keeps its file: dev shape; got ${JSON.stringify(devDeps[module])})`,
 	);
 }
 
