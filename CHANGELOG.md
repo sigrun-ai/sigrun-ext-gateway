@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-11-02
+### Changed
+- Widened the `@sigrun/shared` peer to `0.3.0 || 0.4.0 || 0.4.1 || 0.4.2 || 0.5.0`
+  for the sigrun 0.5.0 curator release. No behaviour change.
 ## [0.1.7] - 2026-10-31
 ### Changed
 - Widened the `@sigrun/shared` peer to `0.3.0 || 0.4.0 || 0.4.1 || 0.4.2` for
