@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-11-02
+### Fixed
+- The test fake-host carries the (inert) `curation` host member the
+  contract requires since sigrun 0.5.0 — the v0.1.8 tag's release run
+  failed typecheck against core main. No runtime change (the peer line
+  from 0.1.8 rides here; 0.1.8 never published).
 ## [0.1.8] - 2026-11-02
 ### Changed
 - Widened the `@sigrun/shared` peer to `0.3.0 || 0.4.0 || 0.4.1 || 0.4.2 || 0.5.0`

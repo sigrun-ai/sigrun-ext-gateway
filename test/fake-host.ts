@@ -28,7 +28,7 @@ import type {
 	InteractionAnswer,
 	InteractionRecord,
 } from "@sigrun/shared/interactions";
-import type { Principal } from "@sigrun/sigrun/extension";
+import type { Principal, SigrunCurationHost } from "@sigrun/sigrun/extension";
 import type {
 	ConversationSummary,
 	ConversationViewWire,
@@ -198,7 +198,64 @@ export async function createFakeHost(
 		source: "gateway",
 	});
 
+	// The inert curation surface (curator P6, A9): the gateway never
+	// calls it; the host contract requires the member since sigrun 0.5.0.
+	const curation: SigrunCurationHost = {
+		eligibility: async () => ({
+			owner: undefined,
+			internal: false,
+			ownerOnly: true,
+			unattributed: 0,
+		}),
+		authors: async () => new Map(),
+		modelCallsSince: async () => 0,
+		takeHints: async () => [],
+		targets: async () => [],
+		tools: async () => [],
+		forkReview: async () => ({ status: "completed", text: "", changes: [] }),
+		digestRun: async () => ({ status: "completed", text: "", changes: [] }),
+		maintain: async () => ({ changes: [] }),
+		skills: () => ({
+			list: async () => [],
+			view: async () => "",
+			feed: async () => [],
+			pin: async () => undefined,
+			undo: async () => [],
+			apply: async (name, change) => ({
+				id: `feed-${name}-${change.kind}`,
+				at: new Date(0).toISOString(),
+				actor: "curator" as const,
+				action: change.kind,
+				skill: name,
+			}),
+		}),
+		overlays: () => ({
+			list: async () => [],
+			get: async () => undefined,
+			put: async (key, _text, _hash, meta) => ({
+				id: `feed-overlay-${key.skill}`,
+				at: new Date(0).toISOString(),
+				actor: meta.actor,
+				action: "overlay",
+				skill: key.skill,
+			}),
+			remove: async (key, meta) => ({
+				id: `feed-overlay-remove-${key.skill}`,
+				at: new Date(0).toISOString(),
+				actor: meta.actor,
+				action: "overlay",
+				skill: key.skill,
+			}),
+			markOrphans: async () => undefined,
+		}),
+		upstream: async () => undefined,
+		jobSkillRefs: async () => new Set<string>(),
+		undoReview: async () => 0,
+		usage: async () => ({}),
+	};
+
 	const host: SigrunHost = {
+		curation,
 		stores: {
 			// Per-user stores are outside the gateway's reads; keep the
 			// contract whole with the same in-memory settings/secrets.
