@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-11-02
+### Changed
+- Widened the `@sigrun/shared` peer to `0.3.0 || 0.4.0 || 0.4.1 || 0.4.2 || 0.5.0 || 0.6.0`
+  for the sigrun 0.6.0 release. No behaviour change.
+- The test fake host carries core 0.6.0's new host members
+  (`conversations.entries`/`entry`, `jobs.get`, `notify`) so the
+  package typechecks against the 0.6.0 contract.
+
 ## [0.1.9] - 2026-11-02
 ### Fixed
 - The test fake-host carries the (inert) `curation` host member the

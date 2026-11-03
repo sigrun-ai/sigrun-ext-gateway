@@ -256,6 +256,17 @@ export async function createFakeHost(
 
 	const host: SigrunHost = {
 		curation,
+		// Core 0.6.0 members the gateway never calls: an empty job lookup and
+		// a notice sink that records.
+		jobs: {
+			get: async (id: string) => {
+				record("jobs.get", id);
+				return undefined;
+			},
+		},
+		notify: async (input: Parameters<SigrunHost["notify"]>[0]) => {
+			record("notify", input);
+		},
 		stores: {
 			// Per-user stores are outside the gateway's reads; keep the
 			// contract whole with the same in-memory settings/secrets.
@@ -575,6 +586,16 @@ export async function createFakeHost(
 					throw new Error(`fake host: no file at ${path}`);
 				}
 				return { bytes: file.bytes, mime: file.mime };
+			},
+			// The trusted transcript reads (core 0.6.0): the gateway never
+			// reads entries, so the fake serves an empty history.
+			entries: async (id: ConversationId) => {
+				record("conversations.entries", id);
+				return { items: [] };
+			},
+			entry: async (id: ConversationId, entryId: EntryId) => {
+				record("conversations.entry", id, entryId);
+				return undefined;
 			},
 		},
 
