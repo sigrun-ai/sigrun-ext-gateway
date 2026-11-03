@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-11-03
+
+- 0.1.11 was tagged on a commit whose own manifest check rejected the widened peer; never published. This is the real release.
+
 ## [0.1.11] - 2026-11-03
 
 - Peer `@sigrun/shared` gains the 0.6.1 line (no gateway-source changes).
