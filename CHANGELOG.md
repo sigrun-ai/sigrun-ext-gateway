@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ## [Unreleased]
 
+## [0.1.15] - 2026-11-04
+
+- Peer `@sigrun/shared` gains the 0.8.0 line (companion to sigrun 0.8.0's
+  core-notices release).
+
 ## [0.1.14] - 2026-11-04
 
 - Peer `@sigrun/shared` gains the 0.7.0 line (companion to sigrun 0.7.0). 0.1.13 was
