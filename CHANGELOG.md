@@ -6,9 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-## [0.1.13] - 2026-11-04
+## [Unreleased]
 
-- Peer `@sigrun/shared` gains the 0.7.0 line (companion to sigrun 0.7.0).
+## [0.1.14] - 2026-11-04
+
+- Peer `@sigrun/shared` gains the 0.7.0 line (companion to sigrun 0.7.0). 0.1.13 was
+  tagged on a commit whose own manifest guard rejected the widened peer (the exact
+  0.1.11 failure class); this is the real release.
 
 
 ## [0.1.12] - 2026-11-03
