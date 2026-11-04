@@ -11,7 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.15] - 2026-11-04
 
 - Peer `@sigrun/shared` gains the 0.8.0 line (companion to sigrun 0.8.0's
-  core-notices release).
+  core-notices release). 0.1.15 was tagged before the fake host carried
+  the `SigrunHost.notices` member core 0.8.0 adds, so its CI typecheck
+  failed against core @main; this is the real release.
 
 ## [0.1.14] - 2026-11-04
 

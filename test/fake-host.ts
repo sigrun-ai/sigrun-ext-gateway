@@ -267,6 +267,23 @@ export async function createFakeHost(
 		notify: async (input: Parameters<SigrunHost["notify"]>[0]) => {
 			record("notify", input);
 		},
+		// Core 0.8.0 members the gateway never calls: the notices surface
+		// records and answers emptily (same posture as jobs/notify above).
+		notices: {
+			post: async (input: Parameters<SigrunHost["notices"]["post"]>[0]) => {
+				record("notices.post", input);
+				return { id: "notice-0" };
+			},
+			clear: async (
+				selector: Parameters<SigrunHost["notices"]["clear"]>[0],
+			) => {
+				record("notices.clear", selector);
+			},
+			list: async (user: string) => {
+				record("notices.list", user);
+				return [];
+			},
+		},
 		stores: {
 			// Per-user stores are outside the gateway's reads; keep the
 			// contract whole with the same in-memory settings/secrets.
