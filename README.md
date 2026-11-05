@@ -174,7 +174,9 @@ values over chat.
 A record the owning extension marked `declinable` also carries a Decline
 button: a danger-styled row minted independently of the answer plan (a
 webui plan gets just the Decline row after its pointer; a choice plan
-gets the option rows followed by the Decline row). On a channel without
+gets the option rows followed by the Decline row; when the options plus
+the Decline row would exceed the channel's button limit, the choice
+renders as a numbered list with just the Decline row). On a channel without
 button capability the prompt instead says `Reply here to decline.` — a
 plain reply that declines is core's message-decline (no gateway code).
 Decline taps take the same write-access re-check as answers and settle
