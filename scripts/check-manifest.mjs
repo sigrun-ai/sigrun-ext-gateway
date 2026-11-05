@@ -74,7 +74,7 @@ const HOST_MODULE_PINS = {
 	"@earendil-works/chord": "1.3.0",
 	"@earendil-works/pi-codemode": "1.3.0",
 	typebox: "1.3.27",
-	"@sigrun/shared": "0.3.0 || 0.4.0 || 0.4.1 || 0.4.2 || 0.5.0 || 0.6.0 || 0.6.1 || 0.7.0 || 0.8.0",
+	"@sigrun/shared": "0.3.0 || 0.4.0 || 0.4.1 || 0.4.2 || 0.5.0 || 0.6.0 || 0.6.1 || 0.7.0 || 0.8.0 || 0.9.0",
 };
 /** Phase 2 (core 0.3.0): development happens against pi-durable 1.4.0;
  * the peer keeps the widened "1.3.0 || 1.4.0" acceptance above. */

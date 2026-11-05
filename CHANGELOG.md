@@ -13,7 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the module) could not resolve it. The host link masked this in
   practice; the declaration now matches the import.
 
-## [Unreleased]
+## [0.1.18] - 2026-11-05
+
+- Decline button and declined outcomes in chat: a declinable interaction record renders
+  a danger-styled Decline button (any plan kind; budgeted against the channel's
+  `buttons.max`, falling back to a numbered list with just the Decline row at the
+  boundary), `declineFromChat` (write-access re-checked, terminal peek,
+  `host.declineInteraction`), declinedVia-aware settlement edits, and the
+  `Reply here to decline.` line for no-button channels. Companion to sigrun-core's
+  ask-user release line; the `@sigrun/shared` peer gains the 0.9.0 line.
+
 ## [Unreleased]
 
 ## [0.1.15] - 2026-11-04
