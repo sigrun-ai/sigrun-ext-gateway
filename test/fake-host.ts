@@ -263,6 +263,15 @@ export async function createFakeHost(
 			get: () => undefined,
 			call: async () => ({ status: "absent" }),
 		},
+		// The gateway asks no decisions; the fake has no providers.
+		decisions: {
+			list: async () => [],
+			evaluate: async () => ({
+				ok: false as const,
+				code: "not_configured" as const,
+				error: "fake host: no decision providers",
+			}),
+		},
 		// Core 0.6.0 members the gateway never calls: an empty job lookup and
 		// a notice sink that records.
 		jobs: {
@@ -272,6 +281,7 @@ export async function createFakeHost(
 			},
 			// The fake gateway has no jobs: nothing is a job run.
 			isJobRun: async () => false,
+			activeRun: async () => undefined,
 		},
 		notify: async (input: Parameters<SigrunHost["notify"]>[0]) => {
 			record("notify", input);
@@ -750,6 +760,11 @@ export async function createFakeHost(
 			list: async () => {
 				record("models.list");
 				return models;
+			},
+			// The gateway never completes on behalf of extensions; the fake
+			// fails loudly rather than invent a model answer.
+			complete: async () => {
+				throw new Error("fake host: no model completion");
 			},
 		},
 

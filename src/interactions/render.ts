@@ -56,7 +56,12 @@ export function planInteraction(
 				kind: "choice",
 				field: choice.name,
 				options: choice.options,
-				buttons: choice.options.length <= (caps.buttons?.max ?? 0),
+				// The Decline row shares the button budget: a declinable
+				// record needs one more slot, so a maxed-out choice falls
+				// back to the numbered list (its Decline row still renders).
+				buttons:
+					choice.options.length + (record.declinable === true ? 1 : 0) <=
+					(caps.buttons?.max ?? 0),
 			};
 		}
 	}

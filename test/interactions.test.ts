@@ -205,6 +205,21 @@ describe("renderInteraction decline row", () => {
 		expect(rendered.buttons?.[1]?.[0]).toMatchObject({ label: "Decline", style: "danger", data: "t:interaction-decline" });
 	});
 
+	test("a declinable choice AT the button budget falls back to the numbered list with one Decline row", () => {
+		const rendered = renderInteraction(record(GATE, { declinable: true }), caps({ buttons: { max: 2 } }), {
+			conversationName: "Gateway chat",
+			issue: (action) => `t:${action.kind}`,
+		});
+		expect(rendered.text).toContain("Reply with a number.");
+		expect(rendered.buttons).toHaveLength(1);
+		expect(rendered.buttons?.[0]?.[0]).toMatchObject({ label: "Decline", style: "danger", data: "t:interaction-decline" });
+		// Without declinable the same two options fit the budget.
+		expect(renderInteraction(record(GATE), caps({ buttons: { max: 2 } }), {
+			conversationName: "Gateway chat",
+			issue: () => "t:synthetic",
+		}).buttons?.[0]).toHaveLength(2);
+	});
+
 	test("a channel without button capability gets the decline line instead", () => {
 		const rendered = renderInteraction(record(GATE, { declinable: true }), caps({ buttons: undefined }), {
 			conversationName: "Gateway chat",
