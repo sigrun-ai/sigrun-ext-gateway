@@ -3,7 +3,7 @@
  * durable ledger entries; delivery receipts populate PromptStore refs so
  * settlement can edit the exact platform messages.
  */
-import { summarizeValues } from "./answer.js";
+import { outcomeOf } from "./answer.js";
 import { planInteraction, renderInteraction, truncateInteractionText } from "./render.js";
 /** The gateway notifier: interaction.pending plus the ordinary home notifier. */
 export function createInteractionNotifier(deps) {
@@ -120,14 +120,18 @@ export async function onInteractionSettled(event, deps, context) {
 }
 /** The outcome summary the settlement edit/notice carries. */
 function outcomeText(event) {
-    const who = event.answeredByUser === undefined ? "" : ` by ${event.answeredByUser}`;
-    // SAFETY: the stored answer's values are validated JsonValue (the
-    // record's answer shape); the payload types them loosely because
-    // the contract cannot import the json module's runtime shape.
-    const answerValues = (event.answer ?? {});
-    return event.status === "answered"
-        ? `answered${who}: ${summarizeValues(answerValues)}`
-        : `${event.status}${who}`;
+    // Delegates to outcomeOf (ONE wording for live taps and settlement
+    // edits); SAFETY: the stored answer's values are validated JsonValue
+    // (the record's answer shape) — the payload types them loosely
+    // because the contract cannot import the json module's runtime shape.
+    return outcomeOf({
+        status: event.status,
+        ...(event.answer === undefined
+            ? {}
+            : { answer: { values: event.answer } }),
+        ...(event.answeredByUser === undefined ? {} : { answeredByUser: event.answeredByUser }),
+        ...(event.declinedVia === undefined ? {} : { declinedVia: event.declinedVia }),
+    });
 }
 /**
  * Enqueue settlement edits and per-binding fallback outcome notices

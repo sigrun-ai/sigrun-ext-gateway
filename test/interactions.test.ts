@@ -477,7 +477,7 @@ describe("prompt delivery and answering", () => {
 		await r.host.seedInteraction(7 as never, record(GATE, { callId: "call-1", declinable: true }), CONTEXT);
 		expect(await declineFromChat(r.deps, { conversationId: 7, callId: "call-1", user: "alice" })).toBe("Declined.");
 		const call = r.host.calls.find((candidate) => candidate.method === "declineInteraction");
-		expect(call?.args).toEqual([7, "call-1", expect.anything(), "alice"]);
+		expect(call?.args).toEqual([7, "call-1", { user: "alice" }]);
 		expect(r.host.interactions.get("7:call-1")?.status).toBe("skipped");
 		expect(r.host.interactions.get("7:call-1")?.declinedVia).toBe("button");
 
@@ -587,6 +587,20 @@ describe("prompt delivery and answering", () => {
 		await pipeline.action("loop", action, r.config);
 		expect(r.host.interactions.get("7:call-1")?.status).toBe("answered");
 		expect(r.channel.sent.at(-1)?.text).toContain("Answered");
+	});
+
+	test("settlement edits render declined outcomes (button and message)", async () => {
+		const r = await rig();
+		await r.bindings.bind(KEY, 7, CHAT);
+		await r.prompts.record(7, "call-decline", KEY, { chat: CHAT, messageId: "loop-1" }, { kind: "webui" });
+		await onInteractionSettled({ conversationId: 7 as never, callId: "call-decline", kind: "gate.ask", status: "skipped", answeredByUser: "alice", declinedVia: "button" }, r.deps, CONTEXT);
+		const buttonEdit = r.ledger.list().find((candidate) => candidate.kind === "edit");
+		expect(buttonEdit?.message.text).toBe("Interaction declined by alice.");
+
+		await r.prompts.record(7, "call-decline-msg", KEY, { chat: CHAT, messageId: "loop-2" }, { kind: "webui" });
+		await onInteractionSettled({ conversationId: 7 as never, callId: "call-decline-msg", kind: "gate.ask", status: "skipped", answeredByUser: "alice", declinedVia: "message" }, r.deps, CONTEXT);
+		const messageEdit = r.ledger.list().filter((candidate) => candidate.kind === "edit")[1];
+		expect(messageEdit?.message.text).toBe("Interaction declined by alice (replied in chat).");
 	});
 
 	test("settlement edits clamp and carry the bound key for chat-gone handling", async () => {

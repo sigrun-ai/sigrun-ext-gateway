@@ -738,7 +738,7 @@ describe("pipeline: interaction-decline taps", () => {
 		}, { abortSignal: new AbortController().signal });
 		const token = tokens.issue({ kind: "interaction-decline", conversationId: 1, callId: "call-1" });
 		await raw.action("loop", { chat: { chatId: "100000001", chatType: "dm" }, sender: { id: "100000001" }, data: token }, config);
-		expect(r.host.calls.some((call) => call.method === "declineInteraction" && call.args[3] === "alice")).toBe(true);
+		expect(r.host.calls.some((call) => call.method === "declineInteraction" && (call.args[2] as { user?: string } | undefined)?.user === "alice")).toBe(true);
 		expect(r.channel.sent.at(-1)?.text).toBe("Declined.");
 	});
 });

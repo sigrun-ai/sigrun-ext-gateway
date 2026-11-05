@@ -157,17 +157,18 @@ export async function onInteractionSettled(
 
 /** The outcome summary the settlement edit/notice carries. */
 function outcomeText(event: ExtensionLifecyclePayload["interactionSettled"]): string {
-	const who =
-		event.answeredByUser === undefined ? "" : ` by ${event.answeredByUser}`;
-	// SAFETY: the stored answer's values are validated JsonValue (the
-	// record's answer shape); the payload types them loosely because
-	// the contract cannot import the json module's runtime shape.
-	const answerValues = (event.answer ?? {}) as Parameters<
-		typeof summarizeValues
-	>[0];
-	return event.status === "answered"
-		? `answered${who}: ${summarizeValues(answerValues)}`
-		: `${event.status}${who}`;
+	// Delegates to outcomeOf (ONE wording for live taps and settlement
+	// edits); SAFETY: the stored answer's values are validated JsonValue
+	// (the record's answer shape) — the payload types them loosely
+	// because the contract cannot import the json module's runtime shape.
+	return outcomeOf({
+		status: event.status,
+		...(event.answer === undefined
+			? {}
+			: { answer: { values: event.answer as Parameters<typeof summarizeValues>[0] } }),
+		...(event.answeredByUser === undefined ? {} : { answeredByUser: event.answeredByUser }),
+		...(event.declinedVia === undefined ? {} : { declinedVia: event.declinedVia }),
+	});
 }
 
 /**

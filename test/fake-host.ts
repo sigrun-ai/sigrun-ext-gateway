@@ -261,7 +261,7 @@ export async function createFakeHost(
 		// answers absent and a call resolves unowned (never throws).
 		publishedHooks: {
 			get: () => undefined,
-			call: async (name) => ({ status: "absent", name }),
+			call: async () => ({ status: "absent" }),
 		},
 		// Core 0.6.0 members the gateway never calls: an empty job lookup and
 		// a notice sink that records.
@@ -422,8 +422,7 @@ export async function createFakeHost(
 				"declineInteraction",
 				conversationId,
 				callId,
-				context,
-				opts?.user,
+				...(opts === undefined ? [] : [opts]),
 			);
 			void context;
 			const key = `${conversationId}:${callId}`;
