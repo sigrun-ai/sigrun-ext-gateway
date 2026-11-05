@@ -25,6 +25,12 @@ export interface ChatAnswer {
 }
 /** Answer after proving the named chat user can still write the conversation. */
 export declare function answerFromChat(deps: AnswerDeps, answer: ChatAnswer): Promise<string>;
+/** Decline a declinable interaction (the write-access + terminal guards mirror answerFromChat). */
+export declare function declineFromChat(deps: Pick<AnswerDeps, "host" | "context">, target: {
+    conversationId: number;
+    callId: string;
+    user: string | undefined;
+}): Promise<string>;
 /** One shared human-readable outcome for settlement edits and stale taps. */
 export declare function outcomeOf(record: {
     readonly status: string;
@@ -32,6 +38,7 @@ export declare function outcomeOf(record: {
         readonly values: Readonly<Record<string, JsonValue>>;
     };
     readonly answeredByUser?: string;
+    readonly declinedVia?: "button" | "message";
 }): string;
 export declare function summarizeValues(values: Readonly<Record<string, JsonValue>>): string;
 /** Stage 8: consume a numbered or reply-to answer, else continue admission. */

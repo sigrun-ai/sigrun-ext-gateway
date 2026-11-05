@@ -76,15 +76,51 @@ export async function answerFromChat(
 	return `Answered: ${summarizeValues(answer.values)}.`;
 }
 
+/** Decline a declinable interaction (the write-access + terminal guards mirror answerFromChat). */
+export async function declineFromChat(
+	deps: Pick<AnswerDeps, "host" | "context">,
+	target: { conversationId: number; callId: string; user: string | undefined },
+): Promise<string> {
+	if (target.user === undefined) return "You do not have write access to this conversation.";
+	const meta = await deps.host.conversations.meta(target.conversationId as ConversationId);
+	const access = await deps.host.access.accessOf(
+		{ user: target.user },
+		{ owner: meta.owner, sharing: meta.sharing },
+	);
+	if (access !== "write") return "You do not have write access to this conversation.";
+	const context = deps.context ?? { abortSignal: new AbortController().signal };
+	const record = await deps.host.peekInteraction(
+		target.conversationId as ConversationId,
+		target.callId,
+		context,
+	);
+	if (record !== undefined && TERMINAL.has(record.status)) {
+		return `Already ${outcomeOf(record)}.`;
+	}
+	if (record === undefined) return "That interaction is no longer available.";
+	const declined = await deps.host.declineInteraction(
+		target.conversationId as ConversationId,
+		target.callId,
+		context,
+		{ user: target.user },
+	);
+	if (!declined) return "Already settled.";
+	return "Declined.";
+}
+
 /** One shared human-readable outcome for settlement edits and stale taps. */
 export function outcomeOf(record: {
 	readonly status: string;
 	readonly answer?: { readonly values: Readonly<Record<string, JsonValue>> };
 	readonly answeredByUser?: string;
+	readonly declinedVia?: "button" | "message";
 }): string {
 	const who = record.answeredByUser === undefined ? "" : ` by ${record.answeredByUser}`;
 	if (record.status === "answered") {
 		return `answered${who}: ${summarizeValues(record.answer?.values ?? {})}`;
+	}
+	if (record.status === "skipped" && record.declinedVia !== undefined) {
+		return `declined${who}${record.declinedVia === "message" ? " (replied in chat)" : ""}`;
 	}
 	return `${record.status}${who}`;
 }

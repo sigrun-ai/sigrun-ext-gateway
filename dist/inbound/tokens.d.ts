@@ -27,6 +27,11 @@ export type TokenAction = {
     /** The root-form choice field (U6 records are not decision-specific). */
     readonly field?: string;
     readonly optionId: string;
+} | {
+    /** Decline a declinable interaction (ask-user Task 6): a human's "no". */
+    readonly kind: "interaction-decline";
+    readonly conversationId: number;
+    readonly callId: string;
 };
 /** The button-token table, one instance per engine. */
 export declare class ButtonTokens {

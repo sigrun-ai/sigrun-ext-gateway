@@ -22,7 +22,9 @@ export interface RenderInteractionOptions {
 	/** The conversation stamped into each interaction token. */
 	readonly conversationId?: number;
 	/** Mint the opaque transport-private action carried by each button. */
-	readonly issue: (action: TokenAction & { readonly kind: "interaction" }) => string;
+	readonly issue: (
+		action: TokenAction & { readonly kind: "interaction" | "interaction-decline" },
+	) => string;
 }
 
 /** Plan the one answer mechanism the record's root form supports in chat. */
@@ -54,7 +56,12 @@ export function planInteraction(
 				kind: "choice",
 				field: choice.name,
 				options: choice.options,
-				buttons: choice.options.length <= (caps.buttons?.max ?? 0),
+				// The Decline row shares the button budget: a declinable
+				// record needs one more slot, so a maxed-out choice falls
+				// back to the numbered list (its Decline row still renders).
+				buttons:
+					choice.options.length + (record.declinable === true ? 1 : 0) <=
+					(caps.buttons?.max ?? 0),
 			};
 		}
 	}
@@ -109,6 +116,28 @@ export function renderInteraction(
 	} else {
 		lines.push("Answer this in the webui");
 		if (opts.link !== undefined) lines.push(opts.link);
+	}
+
+	// The Decline affordance is minted OUTSIDE the plan (any declinable
+	// record, independent of plan.kind): a choice plan appends the row
+	// after its option rows; a webui plan gets the row after its pointer.
+	// A channel without buttons gets a line — a reply-to decline is
+	// core's message-decline (no gateway code).
+	if (record.declinable === true) {
+		if (caps.buttons !== undefined) {
+			const declineRow = [{
+				label: truncateLabel("Decline", caps.buttons.labelMax),
+				data: opts.issue({
+					kind: "interaction-decline",
+					conversationId: opts.conversationId ?? 0,
+					callId: record.callId,
+				}),
+				style: "danger" as const,
+			}];
+			buttons = buttons === undefined ? [declineRow] : [...buttons, declineRow];
+		} else {
+			lines.push("Reply here to decline.");
+		}
 	}
 
 	// The body projection is plain text; the capability formatter still

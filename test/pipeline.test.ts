@@ -31,6 +31,12 @@ import { ALBUM_WINDOW_MS } from "../src/inbound/albums.js";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { createEngine } from "../src/engine.js";
 import type { ChannelContext } from "@sigrun/sigrun/extension";
+import { ButtonTokens } from "../src/inbound/tokens.js";
+import { IdentityStore } from "../src/state/identities.js";
+import { PairingStore } from "../src/access/pairing.js";
+import { LinkCodes } from "../src/access/link-codes.js";
+import { LoopGuard } from "../src/access/loop-guard.js";
+import { declineFromChat } from "../src/interactions/answer.js";
 
 /** Await `ms` (the album window's close rides a real timer). */
 function sleep(ms: number): Promise<void> {
@@ -701,5 +707,38 @@ describe("pipeline: submit-error outcomes (M12)", () => {
 			chatId: "100000001",
 			chatType: "dm",
 		});
+	});
+});
+
+describe("pipeline: interaction-decline taps", () => {
+	test("a Decline tap routes to declineInteraction and sends its reply as a notice", async () => {
+		const r = await rig();
+		const tokens = new ButtonTokens();
+		const raw = createPipeline({
+			host: r.host,
+			channel: r.channel,
+			stateDir: r.host.stores.paths.state,
+			log: silentLog(),
+			origins: new Map(),
+			access: {
+				identities: new IdentityStore(r.host, join(r.host.stores.paths.state, "identities.json")),
+				pairing: new PairingStore(join(r.host.stores.paths.state, "pairing.json")),
+				linkCodes: new LinkCodes(),
+				tokens,
+				loopGuard: new LoopGuard(),
+			},
+			interactionDecline: async (target) => await declineFromChat({ host: r.host }, target),
+		});
+		const config = parseGatewayConfig({
+			channels: { loop: { dm: "allowlist", allow: [{ sender: "100000001", user: "alice" }] } },
+		}).channels.loop;
+		if (config === undefined || "failed" in config) throw new Error("loop config failed");
+		await r.host.seedInteraction(1 as never, {
+			kind: "gate.ask", callId: "call-1", status: "pending", createdAt: 1, declinable: true,
+		}, { abortSignal: new AbortController().signal });
+		const token = tokens.issue({ kind: "interaction-decline", conversationId: 1, callId: "call-1" });
+		await raw.action("loop", { chat: { chatId: "100000001", chatType: "dm" }, sender: { id: "100000001" }, data: token }, config);
+		expect(r.host.calls.some((call) => call.method === "declineInteraction" && (call.args[2] as { user?: string } | undefined)?.user === "alice")).toBe(true);
+		expect(r.channel.sent.at(-1)?.text).toBe("Declined.");
 	});
 });

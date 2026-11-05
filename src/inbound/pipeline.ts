@@ -125,6 +125,12 @@ export interface PipelineDeps {
 		readonly values: Record<string, JsonValue>;
 		readonly user: string | undefined;
 	}) => Promise<string>;
+	/** Ask-user Task 6: the write-gated decline seam (Decline button taps). */
+	readonly interactionDecline?: (target: {
+		readonly conversationId: number;
+		readonly callId: string;
+		readonly user: string | undefined;
+	}) => Promise<string>;
 	/** Cross-channel lookup for `/pair` approval notices. Stand-alone
 	 *  pipelines fall back to their own adapter. */
 	readonly channelOf?: (channel: string) => ChannelContribution | undefined;
@@ -838,6 +844,16 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 			channelId,
 			event.sender.id,
 		);
+		if (action.kind === "interaction-decline") {
+			if (deps.interactionDecline === undefined) return;
+			const reply = await deps.interactionDecline({
+				conversationId: action.conversationId,
+				callId: action.callId,
+				user: tapper?.user,
+			});
+			await sendNotice(event.chat, reply, undefined);
+			return;
+		}
 		if (action.kind === "interaction") {
 			if (deps.interactionAnswer === undefined) return;
 			if (action.field === undefined) {

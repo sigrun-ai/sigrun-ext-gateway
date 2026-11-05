@@ -61,7 +61,7 @@ import { hashId } from "./log.js";
 import { collectAttachments } from "./inbound/media.js";
 import { PromptStore } from "./interactions/prompts.js";
 import { createInteractionNotifier, onInteractionSettled, type InteractionChatDeps } from "./interactions/chat.js";
-import { answerFromChat, createInteractionAnswerStage } from "./interactions/answer.js";
+import { answerFromChat, createInteractionAnswerStage, declineFromChat } from "./interactions/answer.js";
 import { receiptForInteraction } from "./interactions/receipts.js";
 import type { ToolDeps } from "./tools.js";
 import type { ChannelSectionDeps } from "./section.js";
@@ -608,6 +608,7 @@ export function createEngine(
 					streams,
 					channelOf,
 					interactionAnswer: async (answer) => await answerFromChat(interactionDeps(), answer),
+					interactionDecline: async (target) => await declineFromChat(interactionDeps(), target),
 					stages: {
 						interactionAnswer: createInteractionAnswerStage({
 							...interactionDeps(),

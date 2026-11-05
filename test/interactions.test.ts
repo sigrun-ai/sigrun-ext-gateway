@@ -27,6 +27,8 @@ import { PromptStore } from "../src/interactions/prompts.js";
 import {
 	answerFromChat,
 	createInteractionAnswerStage,
+	declineFromChat,
+	outcomeOf,
 } from "../src/interactions/answer.js";
 import {
 	createInteractionNotifier,
@@ -166,11 +168,73 @@ describe("planInteraction", () => {
 	});
 });
 
+describe("renderInteraction decline row", () => {
+	const CARD = form([
+		{ type: "section", children: [{ type: "markdown", text: "Body" }] },
+	]);
+
+	test("a declinable webui plan renders one Decline row after the webui line", () => {
+		const rendered = renderInteraction(record(CARD, { declinable: true }), caps(), {
+			conversationName: "Gateway chat",
+			conversationId: 7,
+			issue: (action) => `t:${action.kind}:${action.conversationId}:${action.callId}`,
+		});
+		expect(rendered.text).toContain("Answer this in the webui");
+		expect(rendered.buttons).toHaveLength(1);
+		expect(rendered.buttons?.[0]?.[0]).toMatchObject({ label: "Decline", style: "danger" });
+		expect(rendered.buttons?.[0]?.[0]?.data).toBe("t:interaction-decline:7:call-1");
+	});
+
+	test("the same webui record without declinable has no buttons", () => {
+		const rendered = renderInteraction(record(CARD), caps(), {
+			conversationName: "Gateway chat",
+			issue: () => "t:synthetic",
+		});
+		expect(rendered.buttons).toBeUndefined();
+		expect(rendered.text).not.toContain("Reply here to decline.");
+	});
+
+	test("a declinable choice plan gets its option rows then the Decline row", () => {
+		const rendered = renderInteraction(record(GATE, { declinable: true }), caps(), {
+			conversationName: "Gateway chat",
+			conversationId: 7,
+			issue: (action) => `t:${action.kind}`,
+		});
+		expect(rendered.buttons).toHaveLength(2);
+		expect(rendered.buttons?.[0]?.map((button) => button.label)).toEqual(["Allow", "Deny"]);
+		expect(rendered.buttons?.[1]?.[0]).toMatchObject({ label: "Decline", style: "danger", data: "t:interaction-decline" });
+	});
+
+	test("a declinable choice AT the button budget falls back to the numbered list with one Decline row", () => {
+		const rendered = renderInteraction(record(GATE, { declinable: true }), caps({ buttons: { max: 2 } }), {
+			conversationName: "Gateway chat",
+			issue: (action) => `t:${action.kind}`,
+		});
+		expect(rendered.text).toContain("Reply with a number.");
+		expect(rendered.buttons).toHaveLength(1);
+		expect(rendered.buttons?.[0]?.[0]).toMatchObject({ label: "Decline", style: "danger", data: "t:interaction-decline" });
+		// Without declinable the same two options fit the budget.
+		expect(renderInteraction(record(GATE), caps({ buttons: { max: 2 } }), {
+			conversationName: "Gateway chat",
+			issue: () => "t:synthetic",
+		}).buttons?.[0]).toHaveLength(2);
+	});
+
+	test("a channel without button capability gets the decline line instead", () => {
+		const rendered = renderInteraction(record(GATE, { declinable: true }), caps({ buttons: undefined }), {
+			conversationName: "Gateway chat",
+			issue: () => "t:synthetic",
+		});
+		expect(rendered.buttons).toBeUndefined();
+		expect(rendered.text).toContain("Reply here to decline.");
+	});
+});
+
 describe("renderInteraction", () => {
 	test("bad tone is danger, recommended is first, and labels truncate", () => {
 		const rendered = renderInteraction(record(GATE), caps(), {
 			conversationName: "Gateway chat",
-			issue: (action) => `t:${action.kind}:${action.optionId}`,
+			issue: (action) => `t:${action.kind}:${action.kind === "interaction" ? action.optionId : ""}`,
 		});
 		expect(rendered.buttons).toHaveLength(1);
 		expect(rendered.buttons?.[0]?.map((button) => button.label)).toEqual(["Allow", "Deny"]);
@@ -423,6 +487,29 @@ describe("prompt delivery and answering", () => {
 		})).toContain("Already answered");
 	});
 
+	test("declineFromChat declines as a write user and reports terminal/read states", async () => {
+		const r = await rig();
+		await r.host.seedInteraction(7 as never, record(GATE, { callId: "call-1", declinable: true }), CONTEXT);
+		expect(await declineFromChat(r.deps, { conversationId: 7, callId: "call-1", user: "alice" })).toBe("Declined.");
+		const call = r.host.calls.find((candidate) => candidate.method === "declineInteraction");
+		expect(call?.args).toEqual([7, "call-1", { user: "alice" }]);
+		expect(r.host.interactions.get("7:call-1")?.status).toBe("skipped");
+		expect(r.host.interactions.get("7:call-1")?.declinedVia).toBe("button");
+
+		await r.host.seedInteraction(7 as never, record(GATE, { callId: "call-2", declinable: true }), CONTEXT);
+		expect(await declineFromChat(r.deps, { conversationId: 7, callId: "call-2", user: undefined })).toContain("write access");
+		expect(r.host.interactions.get("7:call-2")?.status).toBe("pending");
+		expect(r.host.calls.filter((candidate) => candidate.method === "declineInteraction")).toHaveLength(1);
+
+		expect(await declineFromChat(r.deps, { conversationId: 7, callId: "call-1", user: "alice" })).toBe("Already declined by alice.");
+	});
+
+	test("outcomeOf words declined records by their transport", () => {
+		expect(outcomeOf({ status: "skipped", declinedVia: "message", answeredByUser: "alice" })).toBe("declined by alice (replied in chat)");
+		expect(outcomeOf({ status: "skipped", declinedVia: "button", answeredByUser: "alice" })).toBe("declined by alice");
+		expect(outcomeOf({ status: "skipped" })).toBe("skipped");
+	});
+
 	test("an unlinked or read-only answerer is refused without writing", async () => {
 		const r = await rig();
 		await seedPending(r.host);
@@ -515,6 +602,20 @@ describe("prompt delivery and answering", () => {
 		await pipeline.action("loop", action, r.config);
 		expect(r.host.interactions.get("7:call-1")?.status).toBe("answered");
 		expect(r.channel.sent.at(-1)?.text).toContain("Answered");
+	});
+
+	test("settlement edits render declined outcomes (button and message)", async () => {
+		const r = await rig();
+		await r.bindings.bind(KEY, 7, CHAT);
+		await r.prompts.record(7, "call-decline", KEY, { chat: CHAT, messageId: "loop-1" }, { kind: "webui" });
+		await onInteractionSettled({ conversationId: 7 as never, callId: "call-decline", kind: "gate.ask", status: "skipped", answeredByUser: "alice", declinedVia: "button" }, r.deps, CONTEXT);
+		const buttonEdit = r.ledger.list().find((candidate) => candidate.kind === "edit");
+		expect(buttonEdit?.message.text).toBe("Interaction declined by alice.");
+
+		await r.prompts.record(7, "call-decline-msg", KEY, { chat: CHAT, messageId: "loop-2" }, { kind: "webui" });
+		await onInteractionSettled({ conversationId: 7 as never, callId: "call-decline-msg", kind: "gate.ask", status: "skipped", answeredByUser: "alice", declinedVia: "message" }, r.deps, CONTEXT);
+		const messageEdit = r.ledger.list().filter((candidate) => candidate.kind === "edit")[1];
+		expect(messageEdit?.message.text).toBe("Interaction declined by alice (replied in chat).");
 	});
 
 	test("settlement edits clamp and carry the bound key for chat-gone handling", async () => {
