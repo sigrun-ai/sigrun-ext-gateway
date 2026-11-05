@@ -34,11 +34,34 @@ export async function answerFromChat(deps, answer) {
     }
     return `Answered: ${summarizeValues(answer.values)}.`;
 }
+/** Decline a declinable interaction (the write-access + terminal guards mirror answerFromChat). */
+export async function declineFromChat(deps, target) {
+    if (target.user === undefined)
+        return "You do not have write access to this conversation.";
+    const meta = await deps.host.conversations.meta(target.conversationId);
+    const access = await deps.host.access.accessOf({ user: target.user }, { owner: meta.owner, sharing: meta.sharing });
+    if (access !== "write")
+        return "You do not have write access to this conversation.";
+    const context = deps.context ?? { abortSignal: new AbortController().signal };
+    const record = await deps.host.peekInteraction(target.conversationId, target.callId, context);
+    if (record !== undefined && TERMINAL.has(record.status)) {
+        return `Already ${outcomeOf(record)}.`;
+    }
+    if (record === undefined)
+        return "That interaction is no longer available.";
+    const declined = await deps.host.declineInteraction(target.conversationId, target.callId, context, { user: target.user });
+    if (!declined)
+        return "Already settled.";
+    return "Declined.";
+}
 /** One shared human-readable outcome for settlement edits and stale taps. */
 export function outcomeOf(record) {
     const who = record.answeredByUser === undefined ? "" : ` by ${record.answeredByUser}`;
     if (record.status === "answered") {
         return `answered${who}: ${summarizeValues(record.answer?.values ?? {})}`;
+    }
+    if (record.status === "skipped" && record.declinedVia !== undefined) {
+        return `declined${who}${record.declinedVia === "message" ? " (replied in chat)" : ""}`;
     }
     return `${record.status}${who}`;
 }

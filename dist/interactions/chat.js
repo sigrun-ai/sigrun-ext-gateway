@@ -68,7 +68,7 @@ async function notifyInteraction(event, deps) {
             conversationId: event.conversationId,
             conversationName: (await deps.host.conversations.meta(event.conversationId)).name ?? `Conversation ${event.conversationId}`,
             ...(event.url === undefined ? {} : { link: event.url }),
-            issue: (action) => deps.tokens.issue(action.kind === "interaction"
+            issue: (action) => deps.tokens.issue(action.kind === "interaction" || action.kind === "interaction-decline"
                 ? { ...action, conversationId: event.conversationId }
                 : action),
         });

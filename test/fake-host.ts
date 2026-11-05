@@ -252,10 +252,17 @@ export async function createFakeHost(
 		jobSkillRefs: async () => new Set<string>(),
 		undoReview: async () => 0,
 		usage: async () => ({}),
+		wantsReview: async () => false,
 	};
 
 	const host: SigrunHost = {
 		curation,
+		// The gateway publishes no hooks and calls none; the registry
+		// answers absent and a call resolves unowned (never throws).
+		publishedHooks: {
+			get: () => undefined,
+			call: async (name) => ({ status: "absent", name }),
+		},
 		// Core 0.6.0 members the gateway never calls: an empty job lookup and
 		// a notice sink that records.
 		jobs: {
@@ -263,6 +270,8 @@ export async function createFakeHost(
 				record("jobs.get", id);
 				return undefined;
 			},
+			// The fake gateway has no jobs: nothing is a job run.
+			isJobRun: async () => false,
 		},
 		notify: async (input: Parameters<SigrunHost["notify"]>[0]) => {
 			record("notify", input);
@@ -397,6 +406,34 @@ export async function createFakeHost(
 				status: "answered",
 				answer,
 				answeredBy: "human",
+				...(opts?.user === undefined
+					? {}
+					: { answeredByUser: opts.user }),
+			});
+			return true;
+		},
+		declineInteraction: async (
+			conversationId: ConversationId,
+			callId: string,
+			context: HandlerContext,
+			opts?: { readonly user?: string },
+		) => {
+			record(
+				"declineInteraction",
+				conversationId,
+				callId,
+				context,
+				opts?.user,
+			);
+			void context;
+			const key = `${conversationId}:${callId}`;
+			const rec = interactions.get(key);
+			if (rec === undefined || rec.status !== "pending") return false;
+			if (rec.declinable !== true) return false;
+			interactions.set(key, {
+				...rec,
+				status: "skipped",
+				declinedVia: "button",
 				...(opts?.user === undefined
 					? {}
 					: { answeredByUser: opts.user }),

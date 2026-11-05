@@ -26,7 +26,7 @@ export interface RenderInteractionOptions {
     readonly conversationId?: number;
     /** Mint the opaque transport-private action carried by each button. */
     readonly issue: (action: TokenAction & {
-        readonly kind: "interaction";
+        readonly kind: "interaction" | "interaction-decline";
     }) => string;
 }
 /** Plan the one answer mechanism the record's root form supports in chat. */

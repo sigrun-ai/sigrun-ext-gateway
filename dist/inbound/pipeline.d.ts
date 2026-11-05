@@ -96,6 +96,12 @@ export interface PipelineDeps {
         readonly values: Record<string, JsonValue>;
         readonly user: string | undefined;
     }) => Promise<string>;
+    /** Ask-user Task 6: the write-gated decline seam (Decline button taps). */
+    readonly interactionDecline?: (target: {
+        readonly conversationId: number;
+        readonly callId: string;
+        readonly user: string | undefined;
+    }) => Promise<string>;
     /** Cross-channel lookup for `/pair` approval notices. Stand-alone
      *  pipelines fall back to their own adapter. */
     readonly channelOf?: (channel: string) => ChannelContribution | undefined;

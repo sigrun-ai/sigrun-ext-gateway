@@ -528,6 +528,17 @@ export function createPipeline(deps) {
         if (action === undefined)
             return;
         const tapper = await access.identities.userFor(config, channelId, event.sender.id);
+        if (action.kind === "interaction-decline") {
+            if (deps.interactionDecline === undefined)
+                return;
+            const reply = await deps.interactionDecline({
+                conversationId: action.conversationId,
+                callId: action.callId,
+                user: tapper?.user,
+            });
+            await sendNotice(event.chat, reply, undefined);
+            return;
+        }
         if (action.kind === "interaction") {
             if (deps.interactionAnswer === undefined)
                 return;

@@ -45,7 +45,7 @@ import { hashId } from "./log.js";
 import { collectAttachments } from "./inbound/media.js";
 import { PromptStore } from "./interactions/prompts.js";
 import { createInteractionNotifier, onInteractionSettled } from "./interactions/chat.js";
-import { answerFromChat, createInteractionAnswerStage } from "./interactions/answer.js";
+import { answerFromChat, createInteractionAnswerStage, declineFromChat } from "./interactions/answer.js";
 import { receiptForInteraction } from "./interactions/receipts.js";
 /** The engine's own timer defaults (the real world). */
 function defaultTimers() {
@@ -456,6 +456,7 @@ export function createEngine(host, deps = {}) {
                     streams,
                     channelOf,
                     interactionAnswer: async (answer) => await answerFromChat(interactionDeps(), answer),
+                    interactionDecline: async (target) => await declineFromChat(interactionDeps(), target),
                     stages: {
                         interactionAnswer: createInteractionAnswerStage({
                             ...interactionDeps(),

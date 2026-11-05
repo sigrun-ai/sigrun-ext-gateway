@@ -171,6 +171,16 @@ long-text field accepts a reply to its prompt. Other forms, including
 all forms containing secrets, point to the webui instead of collecting
 values over chat.
 
+A record the owning extension marked `declinable` also carries a Decline
+button: a danger-styled row minted independently of the answer plan (a
+webui plan gets just the Decline row after its pointer; a choice plan
+gets the option rows followed by the Decline row). On a channel without
+button capability the prompt instead says `Reply here to decline.` — a
+plain reply that declines is core's message-decline (no gateway code).
+Decline taps take the same write-access re-check as answers and settle
+the record `skipped` with `declinedVia: "button"`; outcome lines read
+`declined by alice` (button) or `declined by alice (replied in chat)`.
+
 Button taps, numbered replies, and reply-to text answers require a linked
 sender with current write access to the conversation. Numbered answers
 match only when exactly one choice interaction is pending in that chat.
