@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Reply here to decline.` line for no-button channels. Companion to sigrun-core's
   ask-user release line; the `@sigrun/shared` peer gains the 0.9.0 line.
 
+## [0.1.20] - 2026-11-06
+
+- The @sigrun/shared peer gains the 0.10.1 line (companion to sigrun-core
+  0.10.1); check-manifest's allowed line widens with it. No runtime change.
+
 ## [0.1.19] - 2026-11-06
 
 - The @sigrun/shared peer gains the 0.10.0 line (companion to sigrun-core
