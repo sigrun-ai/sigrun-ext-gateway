@@ -3,7 +3,7 @@
  * error results, never exceptions. Sends persist to the delivery ledger
  * before waiting for a receipt, so a timeout leaves honest queued work.
  */
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { defineTool, } from "@earendil-works/pi-durable";
 import { resolveTargets } from "./jobs.js";
 export const RECEIPT_WAIT_MS = 30_000;
