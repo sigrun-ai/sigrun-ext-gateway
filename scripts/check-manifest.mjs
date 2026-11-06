@@ -92,7 +92,7 @@ for (const [module, spec] of Object.entries(peers)) {
 	const pin = HOST_MODULE_PINS[module];
 	check(
 		spec === pin,
-		`package.json: peerDependencies["${module}"] must be exact "${pin}" (got ${JSON.stringify(spec)})`,
+		`package.json: peerDependencies["${module}"] must be exactly "${pin}" (the 1.5.0-era peers are ranges) (got ${JSON.stringify(spec)})`,
 	);
 	const devPin = DEV_PIN_OVERRIDES[module] ?? pin;
 	check(
