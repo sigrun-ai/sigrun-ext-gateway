@@ -4,7 +4,7 @@
  * before waiting for a receipt, so a timeout leaves honest queued work.
  */
 
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import {
 	defineTool,
 	type ToolExecutionResult,
