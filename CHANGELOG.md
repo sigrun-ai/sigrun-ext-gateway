@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.22] - 2026-11-07
+
+### Changed
+
+- peer pi-durable/pi-ai/chord ~1.5.0 (requires sigrun 0.11.0); @sigrun/shared accepts 0.11.0. The pi-durable 1.5.0 line (0.1.21's registry tarball still carries the 1.4-era peers; this release supersedes it for the 0.11.0 family).
+
 ## [Unreleased]
 
 ### Changed
