@@ -153,6 +153,12 @@ export interface PipelineStreams {
 const UNSERVED_MODEL_NOTICE =
 	"The model <ref> is not available. Use /model to pick another.";
 
+/** The pinned ConversationOpError notices (exact copy). */
+const CONVERSATION_DELETED_NOTICE =
+	"This conversation was deleted. Restore it in sigrun, or send /new to start a new one.";
+const CONVERSATION_OP_NOTICE =
+	"Could not deliver that message. Try again in a moment.";
+
 /** The pinned group refusal for `/link` (spec §8.2, exact copy). */
 const LINK_GROUP_REFUSAL = "send this in a direct message";
 
@@ -725,7 +731,9 @@ export function createPipeline(deps: PipelineDeps): PipelineHandle {
 				await seen.commit(`${key}:${event.messageId}`, now());
 				await sendNotice(
 					event.chat,
-					"Could not deliver that message. Try again in a moment.",
+					code === "conversation_deleted"
+						? CONVERSATION_DELETED_NOTICE
+						: CONVERSATION_OP_NOTICE,
 					undefined,
 				);
 				return dropped();

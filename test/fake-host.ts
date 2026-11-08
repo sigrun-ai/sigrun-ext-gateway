@@ -204,6 +204,7 @@ export async function createFakeHost(
 		eligibility: async () => ({
 			owner: undefined,
 			internal: false,
+			deleted: false,
 			ownerOnly: true,
 			unattributed: 0,
 		}),

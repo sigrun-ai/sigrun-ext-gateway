@@ -608,7 +608,35 @@ describe("pipeline: submit-error outcomes (M12)", () => {
 		expect(outcome).toEqual({ outcome: "dropped" });
 		expect(submits()).toHaveLength(0);
 		expect(channel.sent).toHaveLength(1);
-		expect(channel.sent[0]?.text.length).toBeGreaterThan(0);
+		expect(channel.sent[0]?.text).toBe(
+			"Could not deliver that message. Try again in a moment.",
+		);
+	});
+
+	test("a deleted conversation gets the deleted notice", async () => {
+		const { host, receive, channel, submits } = await rig();
+		const error = namedError("ConversationOpError", "conflict", {
+			body: { error: "conversation_deleted" },
+			status: 409,
+		});
+		failNextSubmit(host, error);
+		const outcome = await receive(dmEvent({ messageId: "m1" }));
+		expect(outcome).toEqual({ outcome: "dropped" });
+		expect(submits()).toHaveLength(0);
+		expect(channel.sent).toHaveLength(1);
+		expect(channel.sent[0]?.text).toBe(
+			"This conversation was deleted. Restore it in sigrun, or send /new to start a new one.",
+		);
+		// The seen record still commits FIRST: a platform redelivery of the
+		// same message dedupes against the committed id rather than
+		// re-attempting the submit (the failure patch is disarmed by then,
+		// so a re-submission would have recorded a submit).
+		const redelivered = await receive(dmEvent({ messageId: "m1" }));
+		expect(redelivered).toEqual({ outcome: "dropped" });
+		expect(channel.sent).toHaveLength(1);
+		expect(
+			host.calls.filter((c) => c.method === "conversations.submit"),
+		).toHaveLength(0);
 	});
 
 	test("an invalid command arg resolves command and commits seen (no redelivery loop)", async () => {

@@ -42,6 +42,9 @@ import { handleChatCommand } from "../commands/chat.js";
 import { admitGroupEvent, ensureGroupShare } from "./groups.js";
 /** The pinned UnservedModelError notice (spec §8.4 M12, exact copy). */
 const UNSERVED_MODEL_NOTICE = "The model <ref> is not available. Use /model to pick another.";
+/** The pinned ConversationOpError notices (exact copy). */
+const CONVERSATION_DELETED_NOTICE = "This conversation was deleted. Restore it in sigrun, or send /new to start a new one.";
+const CONVERSATION_OP_NOTICE = "Could not deliver that message. Try again in a moment.";
 /** The pinned group refusal for `/link` (spec §8.2, exact copy). */
 const LINK_GROUP_REFUSAL = "send this in a direct message";
 /** Build a private access state over `stateDir` (the no-`access` shape). */
@@ -436,7 +439,9 @@ export function createPipeline(deps) {
                 // Commit seen BEFORE the notice (the same ordering as the
                 // UnservedModelError branch: idempotency first, network second).
                 await seen.commit(`${key}:${event.messageId}`, now());
-                await sendNotice(event.chat, "Could not deliver that message. Try again in a moment.", undefined);
+                await sendNotice(event.chat, code === "conversation_deleted"
+                    ? CONVERSATION_DELETED_NOTICE
+                    : CONVERSATION_OP_NOTICE, undefined);
                 return dropped();
             }
             throw error;
