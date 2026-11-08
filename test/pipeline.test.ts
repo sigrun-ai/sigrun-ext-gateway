@@ -615,7 +615,7 @@ describe("pipeline: submit-error outcomes (M12)", () => {
 
 	test("a deleted conversation gets the deleted notice", async () => {
 		const { host, receive, channel, submits } = await rig();
-		const error = namedError("ConversationOpError", "conversation_deleted", {
+		const error = namedError("ConversationOpError", "conflict", {
 			body: { error: "conversation_deleted" },
 			status: 409,
 		});
