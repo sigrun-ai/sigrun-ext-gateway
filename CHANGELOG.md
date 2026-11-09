@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.29] - 2026-11-09
+
+- The @sigrun/shared peer gains the 0.12.0 line (companion to
+  sigrun-core 0.12.0, the embedding-providers release); check-manifest's
+  allowed line widens with it. No runtime change.
+
 ## [0.1.28] - 2026-11-08
 
 - The @sigrun/shared peer gains the 0.11.6 line (companion to
