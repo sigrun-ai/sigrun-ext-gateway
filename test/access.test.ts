@@ -28,7 +28,7 @@ import { runPair, type PairDeps } from "../src/commands/pair.js";
 import { redeemLink, type LinkDeps } from "../src/commands/link.js";
 import { IdentityStore } from "../src/state/identities.js";
 import { createPipeline, type AccessState } from "../src/inbound/pipeline.js";
-import { parseGatewayConfig, type ChannelConfig } from "../src/config.js";
+import { parseGatewayConfig, type ChannelConfig } from "./config.js";
 import type { EngineLog } from "../src/log.js";
 
 const cleanups: Array<() => Promise<void>> = [];

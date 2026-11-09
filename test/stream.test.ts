@@ -19,7 +19,7 @@ import type {
 	OutboundMessage,
 } from "@sigrun/sigrun/extension";
 import { createFakeHost, type FakeHost } from "./fake-host.js";
-import { parseGatewayConfig, type ChannelConfig } from "../src/config.js";
+import { parseGatewayConfig, type ChannelConfig } from "./config.js";
 import { StreamRegistry } from "../src/outbound/stream.js";
 import type { EngineLog } from "../src/log.js";
 

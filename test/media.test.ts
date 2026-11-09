@@ -18,7 +18,7 @@ import { createFakeHost, type FakeHost } from "./fake-host.js";
 import { collectAttachments, TOO_LARGE_NOTE, VOICE_NOTE } from "../src/inbound/media.js";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { createPipeline } from "../src/inbound/pipeline.js";
-import { parseGatewayConfig } from "../src/config.js";
+import { parseGatewayConfig } from "./config.js";
 import type { EngineLog } from "../src/log.js";
 
 const cleanups: Array<() => Promise<void>> = [];

@@ -28,7 +28,8 @@ import type {
 	InteractionAnswer,
 	InteractionRecord,
 } from "@sigrun/shared/interactions";
-import type { Principal, SigrunCurationHost } from "@sigrun/sigrun/extension";
+import type { DeclaredSettings, Principal, SettingsDeclaration, SigrunCurationHost } from "@sigrun/sigrun/extension";
+import { checkStoredSettings } from "@sigrun/sigrun/settings-schema";
 import type {
 	ConversationSummary,
 	ConversationViewWire,
@@ -74,6 +75,8 @@ export interface FakeHostOptions {
 
 /** The fake host surface: the `SigrunHost` plus the test controls. */
 export interface FakeHost extends SigrunHost {
+	/** The factory's declaration, backed by core's checked-read implementation. */
+	readonly declaredSettings: DeclaredSettings<Record<string, unknown>, Record<string, unknown>> | undefined;
 	/** Every host-member call, in order. */
 	readonly calls: readonly FakeCall[];
 	/** The shared invocation context handlers receive (never aborts). */
@@ -256,7 +259,29 @@ export async function createFakeHost(
 		wantsReview: async () => false,
 	};
 
+	let declaredSettings: FakeHost["declaredSettings"];
+
 	const host: SigrunHost = {
+		settings: {
+			declare: <S, U>(decl: SettingsDeclaration) => {
+				record("settings.declare");
+				const read = async (
+					schema: SettingsDeclaration["schema"],
+					stored: Record<string, unknown>,
+				): Promise<Record<string, unknown>> => checkStoredSettings(schema, stored).value;
+				const handle = {
+					get: async () => (await read(decl.schema, settingsValue)) as S,
+					user: (user: string) => ({
+						get: async () => {
+							if (decl.userSchema === undefined) throw new Error("settings.userSchema is not declared");
+							return (await read(decl.userSchema, settingsValue)) as U;
+						},
+					}),
+				};
+				declaredSettings = handle as unknown as FakeHost["declaredSettings"];
+				return handle;
+			},
+		},
 		curation,
 		// The gateway publishes no hooks and calls none; the registry
 		// answers absent and a call resolves unowned (never throws).
@@ -346,6 +371,10 @@ export async function createFakeHost(
 				set: async (key: string, value: string) => {
 					record("stores.secrets.set", key, value);
 					secretsValue[key] = value;
+				},
+				delete: async (key: string) => {
+					record("stores.secrets.delete", key);
+					delete secretsValue[key];
 				},
 			},
 			settings: {
@@ -792,6 +821,7 @@ export async function createFakeHost(
 
 	const fake: FakeHost = {
 		...host,
+		get declaredSettings() { return declaredSettings; },
 		calls,
 		context: HANDLER_CONTEXT,
 		setClaimed: (value: boolean) => {

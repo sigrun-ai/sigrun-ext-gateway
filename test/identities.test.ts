@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import type { ChatRef } from "@sigrun/sigrun/extension";
 import { createFakeHost, type FakeHost } from "./fake-host.js";
-import { parseGatewayConfig, type ChannelConfig } from "../src/config.js";
+import { parseGatewayConfig, type ChannelConfig } from "./config.js";
 import { CHANNEL_ID_PATTERN, IdentityStore } from "../src/state/identities.js";
 import type { EngineLog } from "../src/log.js";
 

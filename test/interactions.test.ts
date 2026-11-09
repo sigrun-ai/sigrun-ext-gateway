@@ -41,7 +41,7 @@ import { IdentityStore } from "../src/state/identities.js";
 import { Ledger } from "../src/state/ledger.js";
 import { ButtonTokens } from "../src/inbound/tokens.js";
 import { createFakeHost } from "./fake-host.js";
-import { parseGatewayConfig, type ChannelConfig } from "../src/config.js";
+import { parseGatewayConfig, type ChannelConfig } from "./config.js";
 import type { EngineLog } from "../src/log.js";
 
 const LOG: EngineLog = {

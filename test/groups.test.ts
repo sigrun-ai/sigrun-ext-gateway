@@ -27,7 +27,7 @@ import {
 	parseGatewayConfig,
 	type ChannelConfig,
 	type GroupConfig,
-} from "../src/config.js";
+} from "./config.js";
 import { IdentityStore } from "../src/state/identities.js";
 import { createPipeline, type AccessState } from "../src/inbound/pipeline.js";
 import { ButtonTokens } from "../src/inbound/tokens.js";
@@ -93,7 +93,7 @@ describe("admitGroupEvent", () => {
 		const malformed = parseGatewayConfig({
 			channels: {
 				loop: {
-					groups: [{ chat: CHAT.chatId, owner: "alice", mention: "sometimes" }],
+					groups: [{ chat: CHAT.chatId, owner: "alice", members: "anyone" }],
 				},
 			},
 		}).channels.loop;

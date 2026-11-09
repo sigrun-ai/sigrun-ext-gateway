@@ -25,8 +25,9 @@ import { BindingStore, bindingKey, type Binding } from "../src/state/bindings.js
 import { IdentityStore } from "../src/state/identities.js";
 import { PairingStore } from "../src/access/pairing.js";
 import { LinkCodes } from "../src/access/link-codes.js";
-import type { GroupConfig } from "../src/config.js";
+import type { GroupConfig } from "./config.js";
 import { createEngine } from "../src/engine.js";
+import { declareSettings } from "../src/config.js";
 import type { EngineLog } from "../src/log.js";
 
 const CHAT: ChatRef = { chatId: "100000001", chatType: "dm" };
@@ -445,6 +446,7 @@ describe("native command menu", () => {
 				menus.push(commands);
 			},
 		};
+		declareSettings(host);
 		const engine = createEngine(host);
 		await engine.start({
 			channels: [{ extension: "fixture", channel }],

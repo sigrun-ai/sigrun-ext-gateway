@@ -22,6 +22,7 @@ import type { ConversationId, EntryId, SubmissionId } from "@earendil-works/pi-d
 import { createFakeHost, type FakeHost } from "./fake-host.js";
 import createGateway from "../src/index.js";
 import { createEngine, type EngineInternals } from "../src/engine.js";
+import { declareSettings } from "../src/config.js";
 import type { GatewayEngine } from "@sigrun/sigrun/extension";
 
 const CHAT = { chatId: "100000001", chatType: "dm" } as const;
@@ -104,6 +105,7 @@ async function rig(log = silentLog()): Promise<Rig> {
 	const channel = fakeChannel();
 	const { Ledger } = await import("../src/state/ledger.js");
 	const ledger = new Ledger(join(host.stores.paths.state, "gateway", "ledger.json"));
+	declareSettings(host);
 	const engine = createEngine(host, { log, deliveryLedger: ledger });
 	await engine.start({
 		channels: [{ extension: "fixture", channel }],
@@ -300,7 +302,7 @@ describe("user deletion", () => {
 			},
 			host.context,
 		);
-		const { parseGatewayConfig } = await import("../src/config.js");
+		const { parseGatewayConfig } = await import("./config.js");
 		const block = parseGatewayConfig({ channels: { loop: {} } }).channels.loop;
 		if (block === undefined || "failed" in block) throw new Error("bad test config");
 		expect(await identities.userFor(block, "loop", "100000001")).toBeUndefined();
