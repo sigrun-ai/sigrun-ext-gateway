@@ -13,7 +13,7 @@ import { afterAll, describe, expect, test } from "vitest";
 import { createFakeHost, type FakeHost } from "./fake-host.js";
 import { BindingStore, bindingKey } from "../src/state/bindings.js";
 import { createChannelSection } from "../src/section.js";
-import { parseGatewayConfig } from "../src/config.js";
+import { parseGatewayConfig } from "./config.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterAll(async () => {

@@ -16,7 +16,7 @@ import { BindingStore, bindingKey } from "../src/state/bindings.js";
 import { IdentityStore } from "../src/state/identities.js";
 import { Ledger } from "../src/state/ledger.js";
 import { createFakeHost, type FakeHost } from "./fake-host.js";
-import { parseGatewayConfig, type GatewayConfig } from "../src/config.js";
+import { parseGatewayConfig, type GatewayConfig } from "./config.js";
 import type { EngineLog } from "../src/log.js";
 
 const cleanups: Array<() => Promise<void>> = [];

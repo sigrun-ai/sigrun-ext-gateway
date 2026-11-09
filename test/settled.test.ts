@@ -24,7 +24,7 @@ import { bindingKey, BindingStore } from "../src/state/bindings.js";
 import { Ledger } from "../src/state/ledger.js";
 import { IdentityStore } from "../src/state/identities.js";
 import { createPipeline, type SubmissionOrigin } from "../src/inbound/pipeline.js";
-import { parseGatewayConfig, type ChannelConfig } from "../src/config.js";
+import { parseGatewayConfig, type ChannelConfig } from "./config.js";
 import type {
 	ConversationId,
 	EntryId,
@@ -327,7 +327,7 @@ describe("onRunSettled: access re-check (M7)", () => {
 		const deps: SettledDeps = {
 			...harness.deps,
 			configOf: async () => parseGatewayConfig({
-				channels: { loop: { groups: [{ chat: chat.chatId }] } },
+				channels: { loop: { groups: [{ chat: chat.chatId, owner: "alice", members: "anyone" }] } },
 			}).channels.loop as ChannelConfig,
 			log: { ...silentLog(), warn: (message) => warnings.push(message) },
 		};

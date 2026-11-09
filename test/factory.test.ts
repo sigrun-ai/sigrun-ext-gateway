@@ -12,6 +12,7 @@ import { afterAll, describe, expect, test } from "vitest";
 import { createFakeHost, type FakeHost } from "./fake-host.js";
 import createGateway from "../src/index.js";
 import { createEngine } from "../src/engine.js";
+import { declareSettings } from "../src/config.js";
 import type { EngineLog } from "../src/log.js";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -82,6 +83,7 @@ describe("createGateway (the factory)", () => {
 			debug: () => {},
 			once: () => {},
 		};
+		declareSettings(host);
 		createEngine(host, { log });
 		expect(warnings).toHaveLength(1);
 		expect(warnings[0]).toContain("2 legacy links");
@@ -160,6 +162,7 @@ describe("createGateway (the factory)", () => {
 			debug: () => {},
 			once: () => {},
 		};
+		declareSettings(host);
 		const engine = createEngine(host, { log });
 		let starts = 0;
 		await engine.start({

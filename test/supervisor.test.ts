@@ -25,6 +25,7 @@ import type {
 } from "@sigrun/sigrun/extension";
 import { createFakeHost, type FakeHost } from "./fake-host.js";
 import { createEngine, type EngineInternals } from "../src/engine.js";
+import { declareSettings } from "../src/config.js";
 import type { GatewayEngine } from "@sigrun/sigrun/extension";
 import { createPipeline } from "../src/inbound/pipeline.js";
 
@@ -173,6 +174,7 @@ describe("supervision (createEngine + fake timers)", () => {
 		const adapter = fakeAdapter("loop");
 		adapter.readiness = { status: "not_configured", detail: "no token" };
 		const time = new FakeTime();
+		declareSettings(host);
 		const engine = createEngine(host, { timers: fakeTimers(time) });
 		await engine.start(engineCtx([
 			{ extension: "fixture", channel: adapter },
@@ -190,6 +192,7 @@ describe("supervision (createEngine + fake timers)", () => {
 		const adapter = fakeAdapter("loop");
 		adapter.failEveryStart = true;
 		const time = new FakeTime();
+		declareSettings(host);
 		const engine = createEngine(host, { timers: fakeTimers(time) });
 		await engine.start(engineCtx([
 			{ extension: "fixture", channel: adapter },
@@ -227,6 +230,7 @@ describe("supervision (createEngine + fake timers)", () => {
 		adapter.failNextStart = true;
 		const time = new FakeTime();
 		time.random = 0.5;
+		declareSettings(host);
 		const engine = createEngine(host, { timers: fakeTimers(time) });
 		await engine.start(engineCtx([
 			{ extension: "fixture", channel: adapter },
@@ -244,6 +248,7 @@ describe("supervision (createEngine + fake timers)", () => {
 		const host = await fakeHost();
 		const adapter = fakeAdapter("loop");
 		const time = new FakeTime();
+		declareSettings(host);
 		const engine = createEngine(host, { timers: fakeTimers(time) });
 		await engine.start(engineCtx([
 			{ extension: "fixture", channel: adapter },
@@ -264,6 +269,7 @@ describe("supervision (createEngine + fake timers)", () => {
 		const adapter = fakeAdapter("loop");
 		const time = new FakeTime();
 		let constructions = 0;
+		declareSettings(host);
 		const engine = createEngine(host, {
 			timers: fakeTimers(time),
 			pipelineFactory: (pipelineDeps) => {
@@ -286,6 +292,7 @@ describe("supervision (createEngine + fake timers)", () => {
 		const adapter = fakeAdapter("loop");
 		adapter.failNextStart = true;
 		const time = new FakeTime();
+		declareSettings(host);
 		const engine = createEngine(host, { timers: fakeTimers(time) });
 		await engine.start(engineCtx([
 			{ extension: "fixture", channel: adapter },
@@ -304,6 +311,7 @@ describe("supervision (createEngine + fake timers)", () => {
 		const host = await fakeHost();
 		const adapter = fakeAdapter("loop");
 		const time = new FakeTime();
+		declareSettings(host);
 		const engine = createEngine(host, { timers: fakeTimers(time) });
 		await engine.start(engineCtx([
 			{ extension: "fixture", channel: adapter },
@@ -364,6 +372,7 @@ describe("supervision (createEngine + fake timers)", () => {
 		const host = await fakeHost();
 		const adapter = fakeAdapter("loop");
 		const time = new FakeTime();
+		declareSettings(host);
 		const engine = createEngine(host, { timers: fakeTimers(time) });
 		await engine.start(engineCtx([
 			{ extension: "fixture", channel: adapter },
@@ -387,6 +396,7 @@ describe("supervision (createEngine + fake timers)", () => {
 			stopped++;
 		};
 		const time = new FakeTime();
+		declareSettings(host);
 		const engine = createEngine(host, { timers: fakeTimers(time) });
 		await engine.start(engineCtx([
 			{ extension: "fixture", channel: adapter },
@@ -414,6 +424,7 @@ describe("supervision (createEngine + fake timers)", () => {
 		const adapter = fakeAdapter("loop");
 		adapter.failNextStart = true;
 		const time = new FakeTime();
+		declareSettings(host);
 		const engine = createEngine(host, { timers: fakeTimers(time) });
 		await engine.start(engineCtx([
 			{ extension: "fixture", channel: adapter },
@@ -434,6 +445,7 @@ describe("supervision (createEngine + fake timers)", () => {
 		const host = await fakeHost();
 		const adapter = fakeAdapter("loop");
 		const time = new FakeTime();
+		declareSettings(host);
 		const engine = createEngine(host, { timers: fakeTimers(time) });
 		await engine.start(engineCtx([
 			{ extension: "fixture", channel: adapter },
@@ -459,21 +471,22 @@ describe("supervision (createEngine + fake timers)", () => {
 describe("engine.health() (§8.12)", () => {
 	test("a config-failed channel degrades health only after 300000 ms of failed dwell (§8.12)", async () => {
 		const host = await fakeHost();
-		// The settings store returns a config whose channel block is
-		// malformed: the channel is {failed} and never started — a static
-		// `failed` row whose §8.12 dwell the health read must count.
-		await host.stores.settings.set({
-			channels: { loop: { dm: "wrong" } },
+		// Schema repairs handle malformed stored fields; this fixture injects
+		// the gateway's channel-level failed form to pin failed-row dwell.
+		host.settings.declare = <S, U>() => ({
+			get: async () => ({ channels: { loop: { failed: "synthetic channel config failure" } } }) as S,
+			user: () => { throw new Error("gateway declares no userSchema"); },
 		});
 		const adapter = fakeAdapter("loop");
 		const time = new FakeTime();
+		declareSettings(host);
 		const engine = createEngine(host, { timers: fakeTimers(time) });
 		await engine.start(engineCtx([
 			{ extension: "fixture", channel: adapter },
 		]));
 		expect(adapter.contexts).toEqual([]);
 		expect(engine.status().channels.loop?.state).toBe("failed");
-		expect(engine.status().channels.loop?.detail).toContain("dm");
+		expect(engine.status().channels.loop?.detail).toContain("synthetic channel config failure");
 		// §8.12's "in backoff/failed for over 5 minutes": the static failed
 		// row degrades after 300000 ms of dwell, not immediately.
 		expect(engine.health()).toBe("ok");
@@ -488,6 +501,7 @@ describe("engine.health() (§8.12)", () => {
 		const host = await fakeHost({ loop: { enabled: false } });
 		const adapter = fakeAdapter("loop");
 		const time = new FakeTime();
+		declareSettings(host);
 		const engine = createEngine(host, { timers: fakeTimers(time) });
 		await engine.start(engineCtx([
 			{ extension: "fixture", channel: adapter },
@@ -506,6 +520,7 @@ describe("engine.health() (§8.12)", () => {
 		const adapter = fakeAdapter("loop");
 		adapter.failEveryStart = true;
 		const time = new FakeTime();
+		declareSettings(host);
 		const engine = createEngine(host, { timers: fakeTimers(time) });
 		await engine.start(engineCtx([
 			{ extension: "fixture", channel: adapter },
@@ -523,6 +538,7 @@ describe("engine.health() (§8.12)", () => {
 		await time.advance(1000);
 		expect(engine.health()).toBe("degraded");
 		// The failedRecently dependency (ledger, Task 5): >0 degrades too.
+		declareSettings(host);
 		const withLedger = createEngine(host, {
 			timers: fakeTimers(new FakeTime()),
 			failedRecently: () => 1,
@@ -534,6 +550,7 @@ describe("engine.health() (§8.12)", () => {
 
 	test("the default failedRecently reads 0 (the ledger lands in Task 5)", async () => {
 		const host = await fakeHost();
+		declareSettings(host);
 		const engine: GatewayEngine & EngineInternals = createEngine(host);
 		expect(engine.health()).toBe("ok");
 		await engine.stop();
@@ -548,6 +565,7 @@ describe("engine state dir under supervision", () => {
 	test("start still creates <stateDir>/gateway", async () => {
 		const host = await fakeHost();
 		const time = new FakeTime();
+		declareSettings(host);
 		const engine = createEngine(host, { timers: fakeTimers(time) });
 		await engine.start(engineCtx([]));
 		const stats = await stat(

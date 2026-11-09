@@ -59,6 +59,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Channels, media and notify settings are declared as a JSON Schema via
+  `host.settings.declare` (channels as a table keyed by id, groups and
+  allow lists as entries) and edited as generated forms on the extension's
+  settings page; the hand-written parser is gone (selfLink-from-dm and the
+  anyone-requires-tools rules still apply after the checked read, group
+  failures still disable only that group). Raises the `@sigrun/sigrun`
+  peer floor to the settings-rework core.
 - peer pi-durable/pi-ai/chord ~1.5.0 (requires sigrun 0.10.0).
 
 ## [0.1.17] - 2026-11-05

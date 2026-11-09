@@ -24,7 +24,7 @@ import { createEngine } from "./engine.js";
 import { createStatusRoute } from "./status-route.js";
 import { runPair } from "./commands/pair.js";
 import { createLinkCommand } from "./commands/link.js";
-import { readConfig } from "./config.js";
+import { declareSettings, readConfig } from "./config.js";
 import { createGatewayTools } from "./tools.js";
 import { createChannelSection } from "./section.js";
 /**
@@ -36,6 +36,8 @@ export default function createGateway(host) {
     if (host.accounts === undefined) {
         throw new Error("gateway requires sigrun core with host.accounts (multi-user M3a)");
     }
+    // The declaration comes FIRST; every later engine read uses its checked handle.
+    declareSettings(host);
     const engine = createEngine(host);
     // `/pair` (§8.2): the admin surface over the shared pairing queue.
     // The invoke route hands the caller's principal (user + EFFECTIVE
@@ -113,7 +115,8 @@ export { createNotifier } from "./notify.js";
 export { StreamRegistry } from "./outbound/stream.js";
 export { Supervisor } from "./supervisor.js";
 export { createStatusRoute } from "./status-route.js";
-export { parseGatewayConfig, readConfig, DEFAULT_MEDIA_MAX_BYTES, } from "./config.js";
+export { declareSettings, resolveGatewayConfig, readConfig, DEFAULT_MEDIA_MAX_BYTES, } from "./config.js";
+export { GATEWAY_SETTINGS_JSON_SCHEMA } from "./settings-schema.js";
 export { JsonFile } from "./state/json-file.js";
 export { bindingKey, BindingStore } from "./state/bindings.js";
 export { SeenSet } from "./state/seen.js";

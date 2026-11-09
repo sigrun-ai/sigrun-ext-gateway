@@ -8,9 +8,9 @@
  */
 
 import { describe, expect, test } from "vitest";
-import { parseGatewayConfig } from "../src/config.js";
+import { parseGatewayConfig } from "./config.js";
 
-describe("parseGatewayConfig", () => {
+describe("gateway checked config", () => {
 	test("an empty object yields every default", () => {
 		expect(parseGatewayConfig({})).toEqual({
 			channels: {},
@@ -220,29 +220,25 @@ describe("parseGatewayConfig", () => {
 		});
 	});
 
-	test("a malformed channel block is {failed} while a sibling parses", () => {
+	test("a malformed channel field repairs to its default while a sibling parses", () => {
 		const config = parseGatewayConfig({
 			channels: {
 				loop: { dm: "nope" },
 				other: { dm: "allowlist" },
 			},
 		});
-		expect(config.channels.loop).toEqual({
-			failed: expect.any(String),
-		});
+		expect(config.channels.loop).toMatchObject({ dm: "pairing" });
 		expect(config.channels.other).toMatchObject({ dm: "allowlist" });
 	});
 
-	test("a non-object channel block is {failed}", () => {
+	test("a non-object channel block is dropped", () => {
 		const config = parseGatewayConfig({
 			channels: { loop: "telegram, obviously" },
 		});
-		expect(config.channels.loop).toEqual({
-			failed: expect.any(String),
-		});
+		expect(config.channels.loop).toBeUndefined();
 	});
 
-	test("a malformed group is {chat, failed} while a sibling group parses", () => {
+	test("a malformed group field repairs while a sibling group parses", () => {
 		const config = parseGatewayConfig({
 			channels: {
 				loop: {
@@ -255,16 +251,11 @@ describe("parseGatewayConfig", () => {
 		});
 		const channel = config.channels.loop;
 		if ("failed" in channel) throw new Error("loop must parse");
-		expect(channel.groups[0]).toEqual({
-			chat: "-9010",
-			failed: expect.any(String),
-		});
+		expect(channel.groups[0]).toMatchObject({ chat: "-9010", mention: "required" });
 		expect(channel.groups[1]).toMatchObject({ owner: "bob" });
 	});
 
-	test("a group block without a chat is {chat: \"\", failed}", () => {
-		// The failed-group form still names WHICH chat failed — an absent
-		// chat renders as the empty string so the row is shaped.
+	test("a group block without a chat is dropped", () => {
 		const config = parseGatewayConfig({
 			channels: {
 				loop: { groups: [{ owner: "alice" }] },
@@ -272,10 +263,7 @@ describe("parseGatewayConfig", () => {
 		});
 		const channel = config.channels.loop;
 		if ("failed" in channel) throw new Error("loop must parse");
-		expect(channel.groups[0]).toEqual({
-			chat: "",
-			failed: expect.any(String),
-		});
+		expect(channel.groups).toEqual([]);
 	});
 
 	test("media.maxBytes and notify.home override defaults", () => {

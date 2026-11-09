@@ -16,6 +16,7 @@ import { BindingStore, bindingKey } from "../src/state/bindings.js";
 import { IdentityStore } from "../src/state/identities.js";
 import { Ledger } from "../src/state/ledger.js";
 import { createGatewayTools, RECEIPT_WAIT_MS } from "../src/tools.js";
+import { declareSettings } from "../src/config.js";
 import type { EngineLog } from "../src/log.js";
 
 const HOME = { chatId: "100000001", chatType: "dm" } as const;
@@ -50,6 +51,7 @@ async function rig(media?: readonly ("image" | "audio" | "video" | "document")[]
 		storesDir: dir,
 		users: [{ user: "alice" }, { user: "bob" }],
 	});
+	declareSettings(host);
 	const conversationId = await host.conversations.create({ owner: "alice" });
 	const bindings = new BindingStore(join(dir, "bindings.json"));
 	const identities = new IdentityStore(host, join(dir, "identities.json"));

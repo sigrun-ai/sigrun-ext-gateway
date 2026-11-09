@@ -26,10 +26,11 @@ import type {
 } from "@sigrun/sigrun/extension";
 import { createFakeHost, type FakeHost } from "./fake-host.js";
 import { createPipeline } from "../src/inbound/pipeline.js";
-import { parseGatewayConfig } from "../src/config.js";
+import { parseGatewayConfig } from "./config.js";
 import { ALBUM_WINDOW_MS } from "../src/inbound/albums.js";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { createEngine } from "../src/engine.js";
+import { declareSettings } from "../src/config.js";
 import type { ChannelContext } from "@sigrun/sigrun/extension";
 import { ButtonTokens } from "../src/inbound/tokens.js";
 import { IdentityStore } from "../src/state/identities.js";
@@ -480,6 +481,7 @@ describe("engine stopIntake: the album flush (Review finding 1)", () => {
 			},
 			send: async () => ({ messageIds: [] }),
 		};
+		declareSettings(host);
 		const engine = createEngine(host);
 		await engine.start({
 			channels: [{ extension: "fixture", channel }],
