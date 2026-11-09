@@ -38,16 +38,20 @@ export async function readConfig(host) {
     return resolveGatewayConfig(await declared.get());
 }
 function resolveChannel(value) {
-    const dm = value.dm;
+    // Defensive: `resolveGatewayConfig` is a public export and a RAW (unchecked,
+    // defaults-not-applied) object may omit every field the checked read would
+    // have defaulted. Treat absent fields as their schema defaults rather than
+    // crashing (the Task 13 review's public-API sharp-edge finding).
+    const dm = value.dm === undefined ? "pairing" : value.dm;
     return {
-        enabled: value.enabled,
+        enabled: (value.enabled ?? true),
         dm,
         selfLink: value.selfLink === undefined ? dm === "pairing" : value.selfLink,
-        allow: value.allow,
-        groups: value.groups.map(resolveGroup),
-        busy: value.busy,
-        stream: value.stream,
-        allowBots: value.allowBots,
+        allow: (value.allow ?? []),
+        groups: (value.groups ?? []).map(resolveGroup),
+        busy: (value.busy ?? "followUp"),
+        stream: (value.stream ?? true),
+        allowBots: (value.allowBots ?? false),
     };
 }
 function resolveGroup(value) {

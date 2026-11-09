@@ -80,16 +80,20 @@ export async function readConfig(host: SigrunHost): Promise<GatewayConfig> {
 }
 
 function resolveChannel(value: Record<string, unknown>): ChannelConfig {
-	const dm = value.dm as DmPolicy;
+	// Defensive: `resolveGatewayConfig` is a public export and a RAW (unchecked,
+	// defaults-not-applied) object may omit every field the checked read would
+	// have defaulted. Treat absent fields as their schema defaults rather than
+	// crashing (the Task 13 review's public-API sharp-edge finding).
+	const dm: DmPolicy = value.dm === undefined ? "pairing" : (value.dm as DmPolicy);
 	return {
-		enabled: value.enabled as boolean,
+		enabled: (value.enabled ?? true) as boolean,
 		dm,
 		selfLink: value.selfLink === undefined ? dm === "pairing" : value.selfLink as boolean,
-		allow: value.allow as ChannelConfig["allow"],
-		groups: (value.groups as readonly Record<string, unknown>[]).map(resolveGroup),
-		busy: value.busy as ChannelConfig["busy"],
-		stream: value.stream as boolean,
-		allowBots: value.allowBots as boolean,
+		allow: (value.allow ?? []) as ChannelConfig["allow"],
+		groups: ((value.groups ?? []) as readonly Record<string, unknown>[]).map(resolveGroup),
+		busy: (value.busy ?? "followUp") as ChannelConfig["busy"],
+		stream: (value.stream ?? true) as boolean,
+		allowBots: (value.allowBots ?? false) as boolean,
 	};
 }
 
