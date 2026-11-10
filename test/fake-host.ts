@@ -798,6 +798,14 @@ export async function createFakeHost(
 			},
 		},
 
+		embeddings: {
+			async embed() {
+				return { ok: false, code: "no_model", message: "no embedding model is configured" };
+			},
+			async list() {
+				return [];
+			},
+		},
 		commands: {
 			list: async () => {
 				record("commands.list");
