@@ -796,6 +796,8 @@ export async function createFakeHost(
 			complete: async () => {
 				throw new Error("fake host: no model completion");
 			},
+			// No local providers in the fake: everything reads not-local.
+			isLocal: () => false,
 		},
 
 		embeddings: {
