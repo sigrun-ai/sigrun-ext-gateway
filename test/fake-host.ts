@@ -660,6 +660,25 @@ export async function createFakeHost(
 				conversationArchived.set(id, next.archived);
 				return next;
 			},
+			// Sittings (core 0.16.0): stubs recording the calls; the gateway
+			// never drives them, but the SigrunHost type requires them.
+			setAutoName: async (
+				id: ConversationId,
+				title: string,
+			) => {
+				record("conversations.setAutoName", id, title);
+				const current = metas.get(id) ?? emptyMeta();
+				const next: SessionMeta = { ...current, autoName: title };
+				metas.set(id, next);
+				return { applied: next.name === undefined };
+			},
+			markContext: async (
+				id: ConversationId,
+				mark: { at: EntryId; label: string },
+			) => {
+				record("conversations.markContext", id, mark);
+				return { entryId: 0 as EntryId };
+			},
 			upload: async (
 				id: ConversationId,
 				file: { name: string; mime?: string; bytes: Uint8Array },
