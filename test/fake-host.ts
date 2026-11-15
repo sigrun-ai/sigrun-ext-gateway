@@ -277,6 +277,7 @@ export async function createFakeHost(
 							return (await read(decl.userSchema, settingsValue)) as U;
 						},
 					}),
+					effective: async () => (await read(decl.schema, settingsValue)) as S,
 				};
 				declaredSettings = handle as unknown as FakeHost["declaredSettings"];
 				return handle;

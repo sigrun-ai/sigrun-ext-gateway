@@ -476,6 +476,7 @@ describe("engine.health() (§8.12)", () => {
 		host.settings.declare = <S, U>() => ({
 			get: async () => ({ channels: { loop: { failed: "synthetic channel config failure" } } }) as S,
 			user: () => { throw new Error("gateway declares no userSchema"); },
+			effective: async () => ({ channels: { loop: { failed: "synthetic channel config failure" } } }) as S,
 		});
 		const adapter = fakeAdapter("loop");
 		const time = new FakeTime();
