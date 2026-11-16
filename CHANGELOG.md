@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.45] - 2026-11-15
+
+- The @sigrun/shared peer gains the 0.20.0 line (companion to
+  sigrun-core 0.20.0 — attachments by kind, bounded recall queries,
+  crash guards). No runtime change.
+
 ## [0.1.44] - 2026-11-15
 
 - The @sigrun/shared peer gains the 0.19.1 line (companion to
