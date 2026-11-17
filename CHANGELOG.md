@@ -195,6 +195,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The `@sigrun/shared` peer becomes an open floor (`>=0.4.2`) instead of a
+  `||` line chain (decisions C5). The floor is 0.4.2 rather than the plan's
+  0.3.0 because the published 0.3.0/0.4.0/0.4.1 tarballs pack
+  metadata-only with no `dist/`, so they can serve none of the exports
+  this extension imports; 0.4.2 is the first line that does. `check-manifest`
+  enforces the same floor. No runtime change.
+
 ## [0.1.15] - 2026-11-04
 
 - Peer `@sigrun/shared` gains the 0.8.0 line (companion to sigrun 0.8.0's
