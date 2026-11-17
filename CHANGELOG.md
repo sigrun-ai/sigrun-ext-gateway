@@ -193,7 +193,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The @sigrun/shared peer gains the 0.10.0 line (companion to sigrun-core
   0.10.0); check-manifest's allowed line widens with it. No runtime change.
 
-## [Unreleased]
+## [0.1.48] - 2026-11-17
 
 - The `@sigrun/shared` peer becomes an open floor (`>=0.4.2`) instead of a
   `||` line chain (decisions C5). The floor is 0.4.2 rather than the plan's
