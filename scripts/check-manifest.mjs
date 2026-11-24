@@ -62,16 +62,16 @@ check(typeof manifest.bugs?.url === "string", "package.json: bugs.url absent");
 check(typeof manifest.homepage === "string", "package.json: homepage absent");
 
 /** Every host module a sigrun extension/provider imports must be a peer.
- * The family develops against the pi-durable 1.5.0 host family
- * (peers accept ~1.5.0; devDeps pin 1.5.0 exactly), keeping one
+ * The family develops against the pi-durable 1.6.0 host family
+ * (peers accept ~1.6.0; devDeps pin 1.6.0 exactly), keeping one
  * type-compatible copy of chord/pi-ai/pi-durable.
  * typebox is pi-ai's own exact dependency (1.3.27) — the
  * host-linked single copy extensions see. */
 const HOST_MODULE_PINS = {
-	"@earendil-works/pi-durable": "~1.5.0",
-	"@earendil-works/pi-ai": "~1.5.0",
-	"@earendil-works/chord": "~1.5.0",
-	"@earendil-works/pi-codemode": "~1.5.0",
+	"@earendil-works/pi-durable": "~1.6.0",
+	"@earendil-works/pi-ai": "~1.6.0",
+	"@earendil-works/chord": "~1.6.0",
+	"@earendil-works/pi-codemode": "~1.6.0",
 	typebox: "1.3.27",
 	// Open floor (C5): any shared line that carries every export this
 	// extension imports. 0.4.2 is the first published line whose tarball
@@ -79,12 +79,12 @@ const HOST_MODULE_PINS = {
 	// metadata-only), so the floor cannot go lower.
 	"@sigrun/shared": ">=0.4.2",
 };
-/** Development happens against pi-durable 1.5.0 (exact). */
+/** Development happens against pi-durable 1.6.0 (exact). */
 const DEV_PIN_OVERRIDES = {
-	"@earendil-works/chord": "1.5.0",
-	"@earendil-works/pi-ai": "1.5.0",
-	"@earendil-works/pi-codemode": "1.5.0",
-	"@earendil-works/pi-durable": "1.5.0",
+	"@earendil-works/chord": "1.6.0",
+	"@earendil-works/pi-ai": "1.6.0",
+	"@earendil-works/pi-codemode": "1.6.0",
+	"@earendil-works/pi-durable": "1.6.0",
 };
 const peers = manifest.peerDependencies ?? {};
 const devDeps = manifest.devDependencies ?? {};
@@ -96,7 +96,7 @@ for (const [module, spec] of Object.entries(peers)) {
 	const pin = HOST_MODULE_PINS[module];
 	check(
 		spec === pin,
-		`package.json: peerDependencies["${module}"] must be exactly "${pin}" (the 1.5.0-era peers are ranges) (got ${JSON.stringify(spec)})`,
+		`package.json: peerDependencies["${module}"] must be exactly "${pin}" (the 1.6.0-era peers are ranges) (got ${JSON.stringify(spec)})`,
 	);
 	const devPin = DEV_PIN_OVERRIDES[module] ?? pin;
 	check(
