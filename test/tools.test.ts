@@ -8,7 +8,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
+import type { ToolExecutionApi, ToolExecutionResult, ToolPark } from "@earendil-works/pi-durable";
 import type { ChannelContribution } from "@sigrun/sigrun/extension";
 import { afterAll, describe, expect, test } from "vitest";
 import { createFakeHost, type FakeHost } from "./fake-host.js";
@@ -18,6 +18,12 @@ import { Ledger } from "../src/state/ledger.js";
 import { createGatewayTools, RECEIPT_WAIT_MS } from "../src/tools.js";
 import { declareSettings } from "../src/config.js";
 import type { EngineLog } from "../src/log.js";
+
+/** Tests drive tools that never park: narrow, asserting no park happened. */
+function settle(result: ToolExecutionResult | ToolPark): ToolExecutionResult {
+	if ("sleep" in result || "wait" in result) throw new Error("test tool parked unexpectedly");
+	return result;
+}
 
 const HOME = { chatId: "100000001", chatType: "dm" } as const;
 const cleanups: Array<() => Promise<void>> = [];
@@ -71,7 +77,7 @@ async function rig(media?: readonly ("image" | "audio" | "video" | "document")[]
 	const call = async (name: string, args: Record<string, unknown>): Promise<ToolExecutionResult> => {
 		const tool = tools.find((candidate) => candidate.name === name);
 		if (tool === undefined) throw new Error(`missing tool ${name}`);
-		return await tool.execute(args, api, BACKGROUND_CONTEXT);
+		return settle(await tool.execute(args, api, BACKGROUND_CONTEXT));
 	};
 	const output = (result: ToolExecutionResult): string => {
 		const first = result.output?.[0];
